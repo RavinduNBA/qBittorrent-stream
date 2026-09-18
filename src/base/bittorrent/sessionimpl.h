@@ -337,6 +337,20 @@ namespace BitTorrent
         void setSendBufferWatermarkFactor(int value) override;
         int connectionSpeed() const override;
         void setConnectionSpeed(int value) override;
+        int peerConnectTimeout() const override;
+        void setPeerConnectTimeout(int value) override;
+        int requestTimeout() const override;
+        void setRequestTimeout(int value) override;
+        int inactivityTimeout() const override;
+        void setInactivityTimeout(int value) override;
+        int handshakeTimeout() const override;
+        void setHandshakeTimeout(int value) override;
+        int maxPeerlistSize() const override;
+        void setMaxPeerlistSize(int value) override;
+        int maxWebSeedConnections() const override;
+        void setMaxWebSeedConnections(int value) override;
+        int trackerCompletionTimeout() const override;
+        void setTrackerCompletionTimeout(int value) override;
         int socketSendBufferSize() const override;
         void setSocketSendBufferSize(int value) override;
         int socketReceiveBufferSize() const override;
@@ -618,6 +632,7 @@ namespace BitTorrent
         void handleSaveResumeDataFailedAlert(const lt::save_resume_data_failed_alert *alert);
         void handleTorrentCheckedAlert(const lt::torrent_checked_alert *alert);
         void handleTorrentFinishedAlert(const lt::torrent_finished_alert *alert);
+        void handlePieceFinishedAlert(const lt::piece_finished_alert *alert);
 
         TorrentImpl *createTorrent(const lt::torrent_handle &nativeHandle, LoadTorrentParams params);
         TorrentImpl *getTorrent(const lt::torrent_handle &nativeHandle) const;
@@ -678,6 +693,13 @@ namespace BitTorrent
         CachedSettingValue<int> m_sendBufferLowWatermark;
         CachedSettingValue<int> m_sendBufferWatermarkFactor;
         CachedSettingValue<int> m_connectionSpeed;
+        CachedSettingValue<int> m_peerConnectTimeout;
+        CachedSettingValue<int> m_requestTimeout;
+        CachedSettingValue<int> m_inactivityTimeout;
+        CachedSettingValue<int> m_handshakeTimeout;
+        CachedSettingValue<int> m_maxPeerlistSize;
+        CachedSettingValue<int> m_maxWebSeedConnections;
+        CachedSettingValue<int> m_trackerCompletionTimeout;
         CachedSettingValue<int> m_socketSendBufferSize;
         CachedSettingValue<int> m_socketReceiveBufferSize;
         CachedSettingValue<int> m_socketBacklogSize;

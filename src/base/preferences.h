@@ -362,6 +362,22 @@ public:
     int getBdecodeTokenLimit() const;
     void setBdecodeTokenLimit(int value);
 
+    // Sliding-Window Streaming Engine
+    int streamSlidingWindowSize() const;
+    void setStreamSlidingWindowSize(int value);
+    int streamRamBufferLimit() const;
+    void setStreamRamBufferLimit(int value);
+    bool isStreamDefaultEnabled() const;
+    void setStreamDefaultEnabled(bool enabled);
+    QString streamTargetPaths() const;
+    void setStreamTargetPaths(const QString &paths);
+    bool isStreamFifoOutputEnabled() const;
+    void setStreamFifoOutputEnabled(bool enabled);
+    int streamPieceDeadlineStepMs() const;
+    void setStreamPieceDeadlineStepMs(int value);
+    QString streamVfsRefreshUrl() const;
+    void setStreamVfsRefreshUrl(const QString &url);
+
     // Stuff that don't appear in the Options GUI but are saved
     // in the same file.
     QDateTime getDNSLastUpd() const;

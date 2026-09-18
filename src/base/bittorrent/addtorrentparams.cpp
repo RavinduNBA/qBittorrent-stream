@@ -45,6 +45,7 @@ const QString PARAM_QUEUETOP = u"add_to_top_of_queue"_s;
 const QString PARAM_STOPPED = u"stopped"_s;
 const QString PARAM_STOPCONDITION = u"stop_condition"_s;
 const QString PARAM_SKIPCHECKING = u"skip_checking"_s;
+const QString PARAM_STREAMMODE = u"stream_mode"_s;
 const QString PARAM_CONTENTLAYOUT = u"content_layout"_s;
 const QString PARAM_AUTOTMM = u"use_auto_tmm"_s;
 const QString PARAM_UPLOADLIMIT = u"upload_limit"_s;
@@ -114,6 +115,7 @@ BitTorrent::AddTorrentParams BitTorrent::parseAddTorrentParams(const QJsonObject
         .savePath = Path(jsonObj.value(PARAM_SAVEPATH).toString()),
         .useDownloadPath = getOptionalBool(jsonObj, PARAM_USEDOWNLOADPATH),
         .downloadPath = Path(jsonObj.value(PARAM_DOWNLOADPATH).toString()),
+        .streamMode = jsonObj.value(PARAM_STREAMMODE).toBool(),
         .addForced = (getEnum<TorrentOperatingMode>(jsonObj, PARAM_OPERATINGMODE) == TorrentOperatingMode::Forced),
         .addToQueueTop = getOptionalBool(jsonObj, PARAM_QUEUETOP),
         .addStopped = getOptionalBool(jsonObj, PARAM_STOPPED),
@@ -149,6 +151,7 @@ QJsonObject BitTorrent::serializeAddTorrentParams(const AddTorrentParams &params
         {PARAM_DOWNLOADPATH, params.downloadPath.data()},
         {PARAM_OPERATINGMODE, Utils::String::fromEnum(params.addForced
                 ? TorrentOperatingMode::Forced : TorrentOperatingMode::AutoManaged)},
+        {PARAM_STREAMMODE, params.streamMode},
         {PARAM_SKIPCHECKING, params.skipChecking},
         {PARAM_UPLOADLIMIT, params.uploadLimit},
         {PARAM_DOWNLOADLIMIT, params.downloadLimit},

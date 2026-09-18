@@ -39,8 +39,12 @@
 #include <libtorrent/disk_interface.hpp>
 #include <libtorrent/file_storage.hpp>
 #include <libtorrent/io_context.hpp>
+#include <libtorrent/sha1_hash.hpp>
+
+#include "stream_storage.hpp"
 
 #include <QHash>
+#include <mutex>
 #else
 #include <libtorrent/storage.hpp>
 #endif
@@ -56,7 +60,14 @@ std::unique_ptr<lt::disk_interface> customMMapDiskIOConstructor(
 class CustomDiskIOThread final : public lt::disk_interface
 {
 public:
-    explicit CustomDiskIOThread(std::unique_ptr<libtorrent::disk_interface> nativeDiskIOThread);
+    explicit CustomDiskIOThread(std::unique_ptr<libtorrent::disk_interface> nativeDiskIOThread, lt::io_context &ioc);
+    ~CustomDiskIOThread() override;
+
+    static void setTorrentStreamMode(const lt::sha1_hash &ih, bool enabled);
+    static bool isTorrentStreamMode(const lt::sha1_hash &ih);
+    static lt::piece_index_t torrentHeadPiece(const lt::sha1_hash &ih);
+    static std::uint64_t torrentStreamedBytes(const lt::sha1_hash &ih);
+    void updateTorrentStreamMode(const lt::sha1_hash &ih, bool enabled);
 
     lt::storage_holder new_torrent(const lt::storage_params &storageParams, const std::shared_ptr<void> &torrent) override;
     void remove_torrent(lt::storage_index_t storageIndex) override;
@@ -93,12 +104,17 @@ private:
     void handleCompleteFiles(libtorrent::storage_index_t storage, const Path &savePath);
 
     std::unique_ptr<lt::disk_interface> m_nativeDiskIO;
+    lt::io_context &m_ioc;
+    mutable std::recursive_mutex m_storageMutex;
 
     struct StorageData
     {
         Path savePath;
         lt::file_storage files;
         lt::aux::vector<lt::download_priority_t, lt::file_index_t> filePriorities;
+        lt::sha1_hash infoHash;
+        std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+        std::shared_ptr<lt::storage_holder> nativeHolder;
     };
     QHash<lt::storage_index_t, StorageData> m_storageData;
 };

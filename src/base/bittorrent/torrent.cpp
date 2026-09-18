@@ -61,6 +61,11 @@ namespace BitTorrent
         return wantedSize() - completedSize();
     }
 
+    void Torrent::toggleStreamMode()
+    {
+        setStreamMode(!isStreamMode());
+    }
+
     void Torrent::toggleSequentialDownload()
     {
         setSequentialDownload(!isSequentialDownload());

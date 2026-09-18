@@ -240,6 +240,7 @@ private:
         {{u"torrents"_s, u"stop"_s}, Http::METHOD_POST},
         {{u"torrents"_s, u"toggleFirstLastPiecePrio"_s}, Http::METHOD_POST},
         {{u"torrents"_s, u"toggleSequentialDownload"_s}, Http::METHOD_POST},
+        {{u"torrents"_s, u"toggleStreamMode"_s}, Http::METHOD_POST},
         {{u"transfer"_s, u"toggleSpeedLimitsMode"_s}, Http::METHOD_POST},
         {{u"torrents"_s, u"topPrio"_s}, Http::METHOD_POST},
     };

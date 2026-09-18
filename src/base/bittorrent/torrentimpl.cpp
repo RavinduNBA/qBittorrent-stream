@@ -1,3 +1,4 @@
+#include <QProcess>
 /*
  * Bittorrent Client using Qt and libtorrent.
  * Copyright (C) 2015-2025  Vladimir Golovnev <glassez@yandex.ru>
@@ -81,7 +82,7 @@
 #include "base/utils/os.h"
 #endif // Q_OS_MACOS || Q_OS_WIN
 
-#ifndef QBT_USES_LIBTORRENT2
+#if 1
 #include "customstorage.h"
 #endif
 
@@ -328,6 +329,16 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
     , m_downloadLimit(cleanLimitValue(m_ltAddTorrentParams.download_limit))
     , m_uploadLimit(cleanLimitValue(m_ltAddTorrentParams.upload_limit))
 {
+#ifdef QBT_USES_LIBTORRENT2
+    const lt::info_hash_t nativeInitHash = static_cast<lt::info_hash_t>(m_infoHash);
+    const lt::sha1_hash initIh = nativeInitHash.has_v1() ? nativeInitHash.v1 : lt::sha1_hash(nativeInitHash.v2.data());
+    m_streamMode = params.streamMode || ::CustomDiskIOThread::isTorrentStreamMode(initIh);
+    if (m_streamMode)
+    {
+        setSequentialDownload(true);
+        ::CustomDiskIOThread::setTorrentStreamMode(initIh, true);
+    }
+#endif
     if (m_ltAddTorrentParams.ti)
     {
         if (const std::time_t creationDate = m_ltAddTorrentParams.ti->creation_date(); creationDate > 0)
@@ -338,6 +349,8 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
         // Initialize it only if torrent is added with metadata.
         // Otherwise it should be initialized in "Metadata received" handler.
         m_torrentInfo = TorrentInfo(*m_ltAddTorrentParams.ti);
+        if (m_streamMode && m_torrentInfo.isValid())
+            applyStreamSlidingWindow();
 
         Q_ASSERT(m_filePaths.isEmpty());
         Q_ASSERT(m_indexMap.isEmpty());
@@ -465,11 +478,26 @@ qlonglong TorrentImpl::totalSize() const
 // size without the "don't download" files
 qlonglong TorrentImpl::wantedSize() const
 {
+    if (m_streamMode)
+        return totalSize();
     return m_nativeStatus.total_wanted;
 }
 
 qlonglong TorrentImpl::completedSize() const
 {
+    if (m_streamMode)
+    {
+        if (isFinished() || m_hasFinishedStatus)
+            return totalSize();
+#ifdef QBT_USES_LIBTORRENT2
+        const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+        const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+        const qlonglong streamed = static_cast<qlonglong>(::CustomDiskIOThread::torrentStreamedBytes(ih));
+        return std::min(totalSize(), streamed + m_nativeStatus.total_wanted_done);
+#else
+        return m_nativeStatus.total_wanted_done;
+#endif
+    }
     return m_nativeStatus.total_wanted_done;
 }
 
@@ -898,6 +926,19 @@ int TorrentImpl::piecesCount() const
 
 int TorrentImpl::piecesHave() const
 {
+    if (m_streamMode)
+    {
+        if (isFinished() || m_hasFinishedStatus)
+            return piecesCount();
+#ifdef QBT_USES_LIBTORRENT2
+        const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+        const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+        const int headIdx = static_cast<int>(::CustomDiskIOThread::torrentHeadPiece(ih));
+        return std::min(piecesCount(), headIdx + m_nativeStatus.num_pieces);
+#else
+        return m_nativeStatus.num_pieces;
+#endif
+    }
     return m_nativeStatus.num_pieces;
 }
 
@@ -905,6 +946,17 @@ qreal TorrentImpl::progress() const
 {
     if (isChecking())
         return m_nativeStatus.progress;
+
+    if (m_streamMode)
+    {
+        if (isFinished() || m_hasFinishedStatus)
+            return 1.;
+        const qlonglong total = totalSize();
+        if (total <= 0)
+            return 0.;
+        const qreal p = static_cast<qreal>(completedSize()) / static_cast<qreal>(total);
+        return std::clamp(p, 0., 1.);
+    }
 
     if (m_nativeStatus.total_wanted == 0)
         return 0.;
@@ -1204,6 +1256,16 @@ bool TorrentImpl::isErrored() const
 
 bool TorrentImpl::isFinished() const
 {
+    if (m_streamMode && m_torrentInfo.isValid())
+    {
+#ifdef QBT_USES_LIBTORRENT2
+        const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+        const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+        const int headIdx = static_cast<int>(::CustomDiskIOThread::torrentHeadPiece(ih));
+        if (headIdx >= m_torrentInfo.piecesCount())
+            return true;
+#endif
+    }
     return ((m_nativeStatus.state == lt::torrent_status::finished)
             || (m_nativeStatus.state == lt::torrent_status::seeding));
 }
@@ -1211,6 +1273,11 @@ bool TorrentImpl::isFinished() const
 bool TorrentImpl::isForced() const
 {
     return (!isStopped() && (m_operatingMode == TorrentOperatingMode::Forced));
+}
+
+bool TorrentImpl::isStreamMode() const
+{
+    return m_streamMode;
 }
 
 bool TorrentImpl::isSequentialDownload() const
@@ -1295,11 +1362,29 @@ bool TorrentImpl::hasMetadata() const
 
 bool TorrentImpl::hasMissingFiles() const
 {
+    if (m_streamMode)
+        return false;
     return m_hasMissingFiles;
 }
 
 bool TorrentImpl::hasError() const
 {
+    static int s_logged = 0;
+    if (s_logged++ < 50)
+    {
+        FILE *dbg = std::fopen("/tmp/error_debug.log", "a");
+        if (dbg) {
+            std::fprintf(dbg, "[hasError] name='%s', errc=%d (%s), is_upload_mode=%d, isStream=%d\n",
+                name().toStdString().c_str(),
+                m_nativeStatus.errc.value(),
+                m_nativeStatus.errc.message().c_str(),
+                (m_nativeStatus.flags & lt::torrent_flags::upload_mode) ? 1 : 0,
+                m_streamMode ? 1 : 0);
+            std::fclose(dbg);
+        }
+    }
+    if (m_streamMode)
+        return false;
     return (m_nativeStatus.errc || (m_nativeStatus.flags & lt::torrent_flags::upload_mode));
 }
 
@@ -1392,8 +1477,29 @@ QList<qreal> TorrentImpl::filesProgress() const
     if (count != filesCount()) [[unlikely]]
         return {};
 
-    if (m_completedFiles.count(true) == count)
+    if (m_completedFiles.count(true) == count || (m_streamMode && isFinished()))
         return QList<qreal>(count, 1);
+
+    if (m_streamMode)
+    {
+        const qlonglong streamed = completedSize();
+        QList<qreal> result;
+        result.reserve(count);
+        for (int i = 0; i < count; ++i)
+        {
+            const int64_t fileOff = m_torrentInfo.fileOffset(i);
+            const int64_t fSize = fileSize(i);
+            if (fSize <= 0)
+                result << 1;
+            else if (streamed <= fileOff)
+                result << 0;
+            else if (streamed >= fileOff + fSize)
+                result << 1;
+            else
+                result << std::clamp(static_cast<qreal>(streamed - fileOff) / fSize, 0., 1.);
+        }
+        return result;
+    }
 
     QList<qreal> result;
     result.reserve(count);
@@ -1701,6 +1807,23 @@ void TorrentImpl::forceRecheck()
     }
 }
 
+void TorrentImpl::setStreamMode(const bool enable)
+{
+    if (m_streamMode == enable)
+        return;
+    m_streamMode = enable;
+    if (m_streamMode)
+    {
+        setSequentialDownload(true);
+        applyStreamSlidingWindow();
+    }
+#ifdef QBT_USES_LIBTORRENT2
+    const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+    const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+    ::CustomDiskIOThread::setTorrentStreamMode(ih, m_streamMode);
+#endif
+}
+
 void TorrentImpl::setSequentialDownload(const bool enable)
 {
     if (enable)
@@ -1730,6 +1853,53 @@ void TorrentImpl::setFirstLastPiecePriority(const bool enabled)
         .arg((enabled ? tr("On") : tr("Off")), name()));
 
     deferredRequestResumeData();
+}
+
+void TorrentImpl::applyStreamSlidingWindow()
+{
+    if (!m_streamMode || !m_torrentInfo.isValid())
+        return;
+
+    const int totalPieces = m_torrentInfo.piecesCount();
+    if (totalPieces <= 0)
+        return;
+
+#ifdef QBT_USES_LIBTORRENT2
+    const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+    const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+    const int headIdx = static_cast<int>(::CustomDiskIOThread::torrentHeadPiece(ih));
+#else
+    const int headIdx = 0;
+#endif
+
+    const int windowSize = Preferences::instance()->streamSlidingWindowSize();
+    const int endIdx = std::min(headIdx + windowSize, totalPieces);
+    const int deadlineStep = Preferences::instance()->streamPieceDeadlineStepMs();
+
+    std::vector<lt::download_priority_t> prios(totalPieces, lt::dont_download);
+    for (int i = headIdx; i < endIdx; ++i)
+    {
+        prios[i] = lt::top_priority;
+        m_nativeHandle.set_piece_deadline(lt::piece_index_t(i), (i - headIdx) * deadlineStep);
+    }
+
+    for (int i = 0; i < headIdx; ++i)
+        m_nativeHandle.reset_piece_deadline(lt::piece_index_t(i));
+    for (int i = endIdx; i < totalPieces; ++i)
+        m_nativeHandle.reset_piece_deadline(lt::piece_index_t(i));
+
+    m_nativeHandle.prioritize_pieces(prios);
+}
+
+void TorrentImpl::onStreamPieceFinished(lt::piece_index_t piece)
+{
+    if (!m_streamMode || !m_torrentInfo.isValid())
+        return;
+
+    m_nativeHandle.piece_priority(piece, lt::dont_download);
+    m_nativeHandle.reset_piece_deadline(piece);
+
+    applyStreamSlidingWindow();
 }
 
 void TorrentImpl::applyFirstLastPiecePriority(const bool enabled)
@@ -1880,6 +2050,8 @@ void TorrentImpl::endReceivedMetadataHandling(const Path &savePath, const PathLi
     // we should apply it now that we have metadata:
     if (m_hasFirstLastPiecePriority)
         applyFirstLastPiecePriority(true);
+    if (m_streamMode)
+        applyStreamSlidingWindow();
 
     m_maintenanceJob = MaintenanceJob::None;
     prepareResumeData(std::move(p));
@@ -1955,11 +2127,14 @@ void TorrentImpl::stop()
 
 void TorrentImpl::start(const TorrentOperatingMode mode)
 {
-    if (hasError())
+    if (hasError() || m_streamMode)
     {
         m_nativeHandle.clear_error();
         m_nativeHandle.unset_flags(lt::torrent_flags::upload_mode);
     }
+
+    if (m_streamMode)
+        applyStreamSlidingWindow();
 
     m_operatingMode = mode;
 
@@ -2133,6 +2308,12 @@ void TorrentImpl::handleTorrentFinished()
         else
         {
             m_hasFinishedStatus = true;
+        if (m_streamMode)
+        {
+            const QString vfsUrl = Preferences::instance()->streamVfsRefreshUrl();
+            if (!vfsUrl.isEmpty())
+                QProcess::startDetached(u"curl"_s, {u"-s"_s, u"-X"_s, u"POST"_s, vfsUrl});
+        }
 
             if (isMoveInProgress() || (m_renameCount > 0))
                 m_moveFinishedTriggers.enqueue([this] { m_session->handleTorrentFinished(this); });
@@ -2262,6 +2443,7 @@ void TorrentImpl::prepareResumeData(lt::add_torrent_params params)
         .operatingMode = m_operatingMode,
         .useAutoTMM = m_useAutoTMM,
         .firstLastPiecePriority = m_hasFirstLastPiecePriority,
+        .streamMode = m_streamMode,
         .hasFinishedStatus = m_hasFinishedStatus,
         .stopped = m_isStopped,
         .stopCondition = m_stopCondition,
@@ -2278,6 +2460,11 @@ void TorrentImpl::prepareResumeData(lt::add_torrent_params params)
 
 void TorrentImpl::handleFastResumeRejected()
 {
+    if (m_streamMode)
+    {
+        applyStreamSlidingWindow();
+        return;
+    }
     // Files were probably moved or storage isn't accessible
     m_hasMissingFiles = true;
 }
@@ -2565,6 +2752,13 @@ void TorrentImpl::updateStatus(const lt::torrent_status &nativeStatus)
         return;
 
     const lt::torrent_status oldStatus = std::exchange(m_nativeStatus, nativeStatus);
+
+    if (m_streamMode && m_nativeStatus.errc)
+    {
+        m_nativeHandle.clear_error();
+        m_nativeHandle.unset_flags(lt::torrent_flags::upload_mode);
+        applyStreamSlidingWindow();
+    }
 
     if (m_nativeStatus.num_pieces != oldStatus.num_pieces)
         updateProgress();

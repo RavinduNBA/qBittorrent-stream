@@ -15,6 +15,7 @@ add_library(qbt_base STATIC
     bittorrent/categoryoptions.h
     bittorrent/common.h
     bittorrent/customstorage.h
+    bittorrent/stream_storage.hpp
     bittorrent/dbresumedatastorage.h
     bittorrent/downloadpathoption.h
     bittorrent/downloadpriority.h
@@ -134,6 +135,7 @@ add_library(qbt_base STATIC
     bittorrent/bencoderesumedatastorage.cpp
     bittorrent/categoryoptions.cpp
     bittorrent/customstorage.cpp
+    bittorrent/stream_storage.cpp
     bittorrent/dbresumedatastorage.cpp
     bittorrent/downloadpathoption.cpp
     bittorrent/downloadpriority.cpp

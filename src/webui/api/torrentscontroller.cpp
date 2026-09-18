@@ -1075,6 +1075,7 @@ void TorrentsController::addAction()
 
     const bool skipChecking = parseBool(params()[u"skip_checking"_s]).value_or(false);
     const bool seqDownload = parseBool(params()[u"sequentialDownload"_s]).value_or(false);
+    const bool streamMode = parseBool(params()[u"streamMode"_s]).value_or(false);
     const bool firstLastPiece = parseBool(params()[u"firstLastPiecePrio"_s]).value_or(false);
     const bool addForced = parseBool(params()[u"forced"_s]).value_or(false);
     const std::optional<bool> addToQueueTop = parseBool(params()[u"addToTopOfQueue"_s]);
@@ -1136,8 +1137,9 @@ void TorrentsController::addAction()
         .savePath = Path(savepath),
         .useDownloadPath = useDownloadPath,
         .downloadPath = Path(downloadPath),
-        .sequential = seqDownload,
+        .sequential = seqDownload || streamMode,
         .firstLastPiecePriority = firstLastPiece,
+        .streamMode = streamMode,
         .addForced = addForced,
         .addToQueueTop = addToQueueTop,
         .addStopped = addStopped,
@@ -1580,6 +1582,16 @@ void TorrentsController::toggleSequentialDownloadAction()
 
     const QStringList hashes {params()[u"hashes"_s].split(u'|')};
     applyToTorrents(hashes, [](BitTorrent::Torrent *const torrent) { torrent->toggleSequentialDownload(); });
+
+    setResult(QString());
+}
+
+void TorrentsController::toggleStreamModeAction()
+{
+    requireParams({u"hashes"_s});
+
+    const QStringList hashes {params()[u"hashes"_s].split(u'|')};
+    applyToTorrents(hashes, [](BitTorrent::Torrent *const torrent) { torrent->toggleStreamMode(); });
 
     setResult(QString());
 }

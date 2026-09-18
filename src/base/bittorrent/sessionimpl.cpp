@@ -470,6 +470,13 @@ SessionImpl::SessionImpl(QObject *parent)
     , m_sendBufferLowWatermark(BITTORRENT_SESSION_KEY(u"SendBufferLowWatermark"_s), 10)
     , m_sendBufferWatermarkFactor(BITTORRENT_SESSION_KEY(u"SendBufferWatermarkFactor"_s), 50)
     , m_connectionSpeed(BITTORRENT_SESSION_KEY(u"ConnectionSpeed"_s), 30)
+    , m_peerConnectTimeout(BITTORRENT_SESSION_KEY(u"PeerConnectTimeout"_s), 15)
+    , m_requestTimeout(BITTORRENT_SESSION_KEY(u"RequestTimeout"_s), 20)
+    , m_inactivityTimeout(BITTORRENT_SESSION_KEY(u"InactivityTimeout"_s), 60)
+    , m_handshakeTimeout(BITTORRENT_SESSION_KEY(u"HandshakeTimeout"_s), 10)
+    , m_maxPeerlistSize(BITTORRENT_SESSION_KEY(u"MaxPeerlistSize"_s), 4000)
+    , m_maxWebSeedConnections(BITTORRENT_SESSION_KEY(u"MaxWebSeedConnections"_s), 30)
+    , m_trackerCompletionTimeout(BITTORRENT_SESSION_KEY(u"TrackerCompletionTimeout"_s), 30)
     , m_socketSendBufferSize(BITTORRENT_SESSION_KEY(u"SocketSendBufferSize"_s), 0)
     , m_socketReceiveBufferSize(BITTORRENT_SESSION_KEY(u"SocketReceiveBufferSize"_s), 0)
     , m_socketBacklogSize(BITTORRENT_SESSION_KEY(u"SocketBacklogSize"_s), 30)
@@ -1875,8 +1882,22 @@ lt::settings_pack SessionImpl::loadLTSettings() const
         | lt::alert::port_mapping_notification
         | lt::alert::status_notification
         | lt::alert::storage_notification
+        | lt::alert::progress_notification
         | lt::alert::tracker_notification;
     settingsPack.set_int(lt::settings_pack::alert_mask, alertMask);
+
+    // High performance cloud streaming with up to 30 webseed mirrors
+    settingsPack.set_int(lt::settings_pack::max_web_seed_connections, maxWebSeedConnections());
+    settingsPack.set_int(lt::settings_pack::peer_connect_timeout, peerConnectTimeout());
+    settingsPack.set_int(lt::settings_pack::request_timeout, requestTimeout());
+    settingsPack.set_int(lt::settings_pack::inactivity_timeout, inactivityTimeout());
+    settingsPack.set_int(lt::settings_pack::handshake_timeout, handshakeTimeout());
+    settingsPack.set_int(lt::settings_pack::max_peerlist_size, maxPeerlistSize());
+    settingsPack.set_int(lt::settings_pack::tracker_completion_timeout, trackerCompletionTimeout());
+    settingsPack.set_int(lt::settings_pack::urlseed_max_request_bytes, 4 * 1024 * 1024);
+    settingsPack.set_int(lt::settings_pack::urlseed_timeout, 10);
+    settingsPack.set_int(lt::settings_pack::urlseed_pipeline_size, 5);
+    settingsPack.set_int(lt::settings_pack::urlseed_wait_retry, 5);
 
     settingsPack.set_int(lt::settings_pack::connection_speed, connectionSpeed());
 
@@ -2663,6 +2684,7 @@ LoadTorrentParams SessionImpl::initLoadTorrentParams(const AddTorrentParams &add
 
     loadTorrentParams.name = addTorrentParams.name;
     loadTorrentParams.firstLastPiecePriority = addTorrentParams.firstLastPiecePriority;
+    loadTorrentParams.streamMode = addTorrentParams.streamMode;
     loadTorrentParams.hasFinishedStatus = addTorrentParams.skipChecking; // do not react on 'torrent_finished_alert' when skipping
     loadTorrentParams.contentLayout = addTorrentParams.contentLayout.value_or(torrentContentLayout());
     loadTorrentParams.operatingMode = (addTorrentParams.addForced ? TorrentOperatingMode::Forced : TorrentOperatingMode::AutoManaged);
@@ -2781,6 +2803,14 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
     if (infoHash.isHybrid())
         cancelDownloadMetadata(altID);
 
+#ifdef QBT_USES_LIBTORRENT2
+    if (addTorrentParams.streamMode)
+    {
+        const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash);
+        const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+        ::CustomDiskIOThread::setTorrentStreamMode(ih, true);
+    }
+#endif
     LoadTorrentParams loadTorrentParams = initLoadTorrentParams(addTorrentParams);
     lt::add_torrent_params &p = loadTorrentParams.ltAddTorrentParams;
     p = source.ltAddTorrentParams();
@@ -2905,10 +2935,19 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
     // Preallocation mode
     p.storage_mode = isPreallocationEnabled() ? lt::storage_mode_allocate : lt::storage_mode_sparse;
 
-    if (addTorrentParams.sequential)
+    if (addTorrentParams.sequential || addTorrentParams.streamMode)
         p.flags |= lt::torrent_flags::sequential_download;
     else
         p.flags &= ~lt::torrent_flags::sequential_download;
+
+    if (addTorrentParams.streamMode && p.ti)
+    {
+        const int totalPieces = p.ti->num_pieces();
+        const int windowSize = 32;
+        p.piece_priorities.assign(totalPieces, lt::dont_download);
+        for (int i = 0; (i < windowSize) && (i < totalPieces); ++i)
+            p.piece_priorities[i] = lt::top_priority;
+    }
 
     // Seeding mode
     // Skip checking and directly start seeding
@@ -4668,6 +4707,62 @@ void SessionImpl::setConnectionSpeed(const int value)
     configureDeferred();
 }
 
+int SessionImpl::peerConnectTimeout() const { return m_peerConnectTimeout; }
+void SessionImpl::setPeerConnectTimeout(const int value)
+{
+    if (value == m_peerConnectTimeout) return;
+    m_peerConnectTimeout = value;
+    configureDeferred();
+}
+
+int SessionImpl::requestTimeout() const { return m_requestTimeout; }
+void SessionImpl::setRequestTimeout(const int value)
+{
+    if (value == m_requestTimeout) return;
+    m_requestTimeout = value;
+    configureDeferred();
+}
+
+int SessionImpl::inactivityTimeout() const { return m_inactivityTimeout; }
+void SessionImpl::setInactivityTimeout(const int value)
+{
+    if (value == m_inactivityTimeout) return;
+    m_inactivityTimeout = value;
+    configureDeferred();
+}
+
+int SessionImpl::handshakeTimeout() const { return m_handshakeTimeout; }
+void SessionImpl::setHandshakeTimeout(const int value)
+{
+    if (value == m_handshakeTimeout) return;
+    m_handshakeTimeout = value;
+    configureDeferred();
+}
+
+int SessionImpl::maxPeerlistSize() const { return m_maxPeerlistSize; }
+void SessionImpl::setMaxPeerlistSize(const int value)
+{
+    if (value == m_maxPeerlistSize) return;
+    m_maxPeerlistSize = value;
+    configureDeferred();
+}
+
+int SessionImpl::maxWebSeedConnections() const { return m_maxWebSeedConnections; }
+void SessionImpl::setMaxWebSeedConnections(const int value)
+{
+    if (value == m_maxWebSeedConnections) return;
+    m_maxWebSeedConnections = value;
+    configureDeferred();
+}
+
+int SessionImpl::trackerCompletionTimeout() const { return m_trackerCompletionTimeout; }
+void SessionImpl::setTrackerCompletionTimeout(const int value)
+{
+    if (value == m_trackerCompletionTimeout) return;
+    m_trackerCompletionTimeout = value;
+    configureDeferred();
+}
+
 int SessionImpl::socketSendBufferSize() const
 {
     return m_socketSendBufferSize;
@@ -5900,6 +5995,9 @@ void SessionImpl::handleAlert(lt::alert *alert)
         case lt::storage_moved_failed_alert::alert_type:
             handleStorageMovedFailedAlert(static_cast<const lt::storage_moved_failed_alert *>(alert));
             break;
+        case lt::piece_finished_alert::alert_type:
+            handlePieceFinishedAlert(static_cast<const lt::piece_finished_alert *>(alert));
+            break;
         case lt::socks5_alert::alert_type:
             handleSocks5Alert(static_cast<const lt::socks5_alert *>(alert));
             break;
@@ -6040,6 +6138,11 @@ void SessionImpl::handleFileErrorAlert(const lt::file_error_alert *alert)
     TorrentImpl *const torrent = getTorrent(alert->handle);
     if (!torrent) [[unlikely]]
         return;
+
+#ifdef QBT_USES_LIBTORRENT2
+    if (torrent->isStreamMode() && (alert->op == lt::operation_t::file_read))
+        return;
+#endif
 
     torrent->handleFileError({.error = alert->error, .operation = alert->op});
 
@@ -6451,6 +6554,15 @@ void SessionImpl::handleTorrentFinishedAlert([[maybe_unused]] const lt::torrent_
 {
     if (TorrentImpl *torrent = getTorrent(alert->handle)) [[likely]]
         torrent->handleTorrentFinished();
+}
+
+void SessionImpl::handlePieceFinishedAlert(const lt::piece_finished_alert *alert)
+{
+    TorrentImpl *torrent = getTorrent(alert->handle);
+    if (!torrent || !torrent->isStreamMode())
+        return;
+
+    torrent->onStreamPieceFinished(alert->piece_index);
 }
 
 void SessionImpl::handleSaveResumeDataAlert(lt::save_resume_data_alert *alert)

@@ -324,6 +324,8 @@ window.qBittorrent.ContextMenu ??= (() => {
     class TorrentsTableContextMenu extends ContextMenu {
         updateMenuItems() {
             let all_are_seq_dl = true;
+            let all_are_stream_mode = true;
+            let there_are_stream_mode = false;
             let there_are_seq_dl = false;
             let all_are_f_l_piece_prio = true;
             let there_are_f_l_piece_prio = false;
@@ -347,6 +349,11 @@ window.qBittorrent.ContextMenu ??= (() => {
                     all_are_seq_dl = false;
                 else
                     there_are_seq_dl = true;
+
+                if (data["stream_mode"] !== true)
+                    all_are_stream_mode = false;
+                else
+                    there_are_stream_mode = true;
 
                 if (data["f_l_piece_prio"] !== true)
                     all_are_f_l_piece_prio = false;
@@ -409,6 +416,7 @@ window.qBittorrent.ContextMenu ??= (() => {
                 this.menu.querySelector("a[href$=uploadLimit]").parentNode.classList.add("separator");
                 this.hideItem("sequentialDownload");
                 this.hideItem("firstLastPiecePrio");
+                this.hideItem("streamMode");
                 this.showItem("superSeeding");
                 this.setItemChecked("superSeeding", all_are_super_seeding);
             }
@@ -430,6 +438,8 @@ window.qBittorrent.ContextMenu ??= (() => {
 
                 this.setItemChecked("sequentialDownload", all_are_seq_dl);
                 this.setItemChecked("firstLastPiecePrio", all_are_f_l_piece_prio);
+                this.showItem("streamMode");
+                this.setItemChecked("streamMode", all_are_stream_mode);
 
                 this.showItem("downloadLimit");
                 this.menu.querySelector("a[href$=uploadLimit]").parentNode.classList.remove("separator");

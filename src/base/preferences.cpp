@@ -359,6 +359,90 @@ void Preferences::setBdecodeTokenLimit(const int value)
     setValue(u"BitTorrent/BdecodeTokenLimit"_s, value);
 }
 
+int Preferences::streamSlidingWindowSize() const
+{
+    return value(u"Preferences/Stream/SlidingWindowSize"_s, 32);
+}
+
+void Preferences::setStreamSlidingWindowSize(const int value)
+{
+    if (value == streamSlidingWindowSize())
+        return;
+    setValue(u"Preferences/Stream/SlidingWindowSize"_s, value);
+}
+
+int Preferences::streamRamBufferLimit() const
+{
+    return value(u"Preferences/Stream/RamBufferLimit"_s, 64);
+}
+
+void Preferences::setStreamRamBufferLimit(const int value)
+{
+    if (value == streamRamBufferLimit())
+        return;
+    setValue(u"Preferences/Stream/RamBufferLimit"_s, value);
+}
+
+bool Preferences::isStreamDefaultEnabled() const
+{
+    return value(u"Preferences/Stream/DefaultEnabled"_s, false);
+}
+
+void Preferences::setStreamDefaultEnabled(const bool enabled)
+{
+    if (enabled == isStreamDefaultEnabled())
+        return;
+    setValue(u"Preferences/Stream/DefaultEnabled"_s, enabled);
+}
+
+QString Preferences::streamTargetPaths() const
+{
+    return value(u"Preferences/Stream/TargetPaths"_s, u"/mnt/cloud-remote,/mnt/storage,/mnt/gdrive"_s);
+}
+
+void Preferences::setStreamTargetPaths(const QString &paths)
+{
+    if (paths == streamTargetPaths())
+        return;
+    setValue(u"Preferences/Stream/TargetPaths"_s, paths);
+}
+
+bool Preferences::isStreamFifoOutputEnabled() const
+{
+    return value(u"Preferences/Stream/FifoOutputEnabled"_s, true);
+}
+
+void Preferences::setStreamFifoOutputEnabled(const bool enabled)
+{
+    if (enabled == isStreamFifoOutputEnabled())
+        return;
+    setValue(u"Preferences/Stream/FifoOutputEnabled"_s, enabled);
+}
+
+int Preferences::streamPieceDeadlineStepMs() const
+{
+    return value(u"Preferences/Stream/PieceDeadlineStepMs"_s, 50);
+}
+
+void Preferences::setStreamPieceDeadlineStepMs(const int value)
+{
+    if (value == streamPieceDeadlineStepMs())
+        return;
+    setValue(u"Preferences/Stream/PieceDeadlineStepMs"_s, value);
+}
+
+QString Preferences::streamVfsRefreshUrl() const
+{
+    return value(u"Preferences/Stream/VfsRefreshUrl"_s, u"http://127.0.0.1:5573/vfs/refresh"_s);
+}
+
+void Preferences::setStreamVfsRefreshUrl(const QString &url)
+{
+    if (url == streamVfsRefreshUrl())
+        return;
+    setValue(u"Preferences/Stream/VfsRefreshUrl"_s, url);
+}
+
 bool Preferences::isToolbarDisplayed() const
 {
     return value(u"Preferences/General/ToolbarDisplayed"_s, true);

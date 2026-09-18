@@ -58,6 +58,7 @@ inline const QString KEY_TORRENT_POPULARITY = u"popularity"_s;
 inline const QString KEY_TORRENT_ETA = u"eta"_s;
 inline const QString KEY_TORRENT_STATE = u"state"_s;
 inline const QString KEY_TORRENT_SEQUENTIAL_DOWNLOAD = u"seq_dl"_s;
+inline const QString KEY_TORRENT_STREAM_MODE = u"stream_mode"_s;
 inline const QString KEY_TORRENT_FIRST_LAST_PIECE_PRIO = u"f_l_piece_prio"_s;
 inline const QString KEY_TORRENT_CATEGORY = u"category"_s;
 inline const QString KEY_TORRENT_TAGS = u"tags"_s;

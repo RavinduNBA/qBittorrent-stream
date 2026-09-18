@@ -239,6 +239,7 @@ BitTorrent::LoadResumeDataResult BitTorrent::BencodeResumeDataStorage::loadTorre
     torrentParams.comment = fromLTString(resumeDataRoot.dict_find_string_value("qBt-comment"));
     torrentParams.hasFinishedStatus = resumeDataRoot.dict_find_int_value("qBt-seedStatus");
     torrentParams.firstLastPiecePriority = resumeDataRoot.dict_find_int_value("qBt-firstLastPiecePriority");
+    torrentParams.streamMode = resumeDataRoot.dict_find_int_value("qBt-streamMode");
     torrentParams.seedingTimeLimit = resumeDataRoot.dict_find_int_value("qBt-seedingTimeLimit", DEFAULT_SEEDING_TIME_LIMIT);
     torrentParams.inactiveSeedingTimeLimit = resumeDataRoot.dict_find_int_value("qBt-inactiveSeedingTimeLimit", DEFAULT_SEEDING_TIME_LIMIT);
     torrentParams.shareLimitAction = Utils::String::toEnum(
@@ -442,6 +443,7 @@ void BitTorrent::BencodeResumeDataStorage::Worker::store(const TorrentID &id, co
     data["qBt-seedStatus"] = resumeData.hasFinishedStatus;
     data["qBt-contentLayout"] = Utils::String::fromEnum(resumeData.contentLayout).toStdString();
     data["qBt-firstLastPiecePriority"] = resumeData.firstLastPiecePriority;
+    data["qBt-streamMode"] = resumeData.streamMode;
     data["qBt-stopCondition"] = Utils::String::fromEnum(resumeData.stopCondition).toStdString();
 
     if (!resumeData.sslParameters.certificate.isNull())
