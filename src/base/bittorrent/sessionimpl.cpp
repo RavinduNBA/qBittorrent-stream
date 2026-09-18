@@ -4928,6 +4928,9 @@ void SessionImpl::setSeedingOutgoingConnections(const bool enabled)
     if (enabled == m_isSeedingOutgoingConnectionsEnabled) return;
 
     m_isSeedingOutgoingConnectionsEnabled = enabled;
+    configureDeferred();
+}
+
 int SessionImpl::peerConnectTimeout() const { return m_peerConnectTimeout; }
 void SessionImpl::setPeerConnectTimeout(const int value)
 {

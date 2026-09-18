@@ -634,8 +634,6 @@ void CustomDiskIOThread::handleCompleteFiles(lt::storage_index_t storage, const 
 #else
     const lt::file_storage &fileStorage = storageData.files;
 #endif
-    const lt::file_storage &fileStorage = storageData.files;
-#endif
     for (const lt::file_index_t fileIndex : fileStorage.file_range())
     {
         // ignore files that have priority 0
