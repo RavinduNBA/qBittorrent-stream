@@ -109,6 +109,7 @@ private slots:
     void setSuperSeedingAction();
     void setForceStartAction();
     void toggleSequentialDownloadAction();
+    void toggleStreamModeAction();
     void toggleFirstLastPiecePrioAction();
     void renameFileAction();
     void renameFolderAction();

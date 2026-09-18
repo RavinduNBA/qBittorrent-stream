@@ -141,6 +141,7 @@ QVariantMap serialize(const BitTorrent::Torrent &torrent)
         {KEY_TORRENT_STATE, torrentStateToString(torrent.state())},
         {KEY_TORRENT_ETA, torrent.eta()},
         {KEY_TORRENT_SEQUENTIAL_DOWNLOAD, torrent.isSequentialDownload()},
+        {KEY_TORRENT_STREAM_MODE, torrent.isStreamMode()},
         {KEY_TORRENT_FIRST_LAST_PIECE_PRIO, torrent.hasFirstLastPiecePriority()},
 
         {KEY_TORRENT_CATEGORY, torrent.category()},

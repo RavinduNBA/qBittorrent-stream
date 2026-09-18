@@ -436,6 +436,25 @@ window.qBittorrent.AddTorrent ??= (() => {
         document.getElementById("useDownloadPath").addEventListener("change", (e) => changeUseDownloadPath(e.target.checked));
         document.getElementById("tagsSelect").addEventListener("change", (e) => changeTagsSelect(e.target));
         document.getElementById("savepath").addEventListener("input", (event) => { showFreeSpace(event.target.value); });
+        document.getElementById("streamMode").addEventListener("change", (e) => {
+            if (e.target.checked)
+                document.getElementById("sequentialDownload").checked = true;
+        });
+
+        // Initialize default stream mode from preferences
+        fetch("api/v2/app/preferences")
+            .then(res => res.json())
+            .then(pref => {
+                if (pref && pref.stream_default_enabled) {
+                    const sm = document.getElementById("streamMode");
+                    if (sm) {
+                        sm.checked = true;
+                        const seq = document.getElementById("sequentialDownload");
+                        if (seq) seq.checked = true;
+                    }
+                }
+            })
+            .catch(() => {});
     });
 
     return exports();

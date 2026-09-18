@@ -1,3 +1,4 @@
+#include "base/preferences.h"
 /*
  * Bittorrent Client using Qt and libtorrent.
  * Copyright (C) 2020  Vladimir Golovnev <glassez@yandex.ru>
@@ -34,6 +35,7 @@
 #include "common.h"
 
 #ifdef QBT_USES_LIBTORRENT2
+#include <libtorrent/hex.hpp>
 #include <libtorrent/mmap_disk_io.hpp>
 #include <libtorrent/posix_disk_io.hpp>
 #if LIBTORRENT_VERSION_NUM >= 20100
@@ -41,41 +43,205 @@
 #endif
 #include <libtorrent/session.hpp>
 
+#include <sys/stat.h>
+#include <unistd.h>
+#include <mutex>
+#include <set>
+
+namespace
+{
+    std::mutex s_streamMutex;
+    std::set<lt::sha1_hash> s_streamModeTorrents;
+    CustomDiskIOThread *s_activeDiskIO = nullptr;
+
+    std::string resolveStreamTargetDir(const QString &savePath, const Preferences *pref)
+    {
+        QString s = savePath.trimmed();
+        // Smart path management: If user selected a path under /mnt/storage (mergerfs mount),
+        // redirect stream writes directly to /mnt/rclone-vfs (cloud mount)
+        // so that it streams straight to Google Drive without consuming local disk space.
+        // Because mergerfs merges /mnt/rclone-vfs into /mnt/storage, the file is immediately
+        // visible at the original /mnt/storage location.
+        if (s.startsWith(u"/mnt/storage"))
+        {
+            s.replace(0, 12, u"/mnt/rclone-vfs"_s);
+            return s.toStdString();
+        }
+
+        const QString targetPaths = pref ? pref->streamTargetPaths() : u"/mnt/cloud-remote,/mnt/storage,/mnt/gdrive,/mnt/rclone-vfs"_s;
+        bool isTargetCloud = false;
+        for (const QString &p : targetPaths.split(u',', Qt::SkipEmptyParts)) {
+            if (!p.trimmed().isEmpty() && s.startsWith(p.trimmed())) { isTargetCloud = true; break; }
+        }
+        if (isTargetCloud || targetPaths.trimmed().isEmpty())
+            return s.toStdString();
+        return {};
+    }
+}
+
 std::unique_ptr<lt::disk_interface> customDiskIOConstructor(
         lt::io_context &ioContext, const lt::settings_interface &settings, lt::counters &counters)
 {
-    return std::make_unique<CustomDiskIOThread>(lt::default_disk_io_constructor(ioContext, settings, counters));
+    return std::make_unique<CustomDiskIOThread>(lt::default_disk_io_constructor(ioContext, settings, counters), ioContext);
 }
 
 std::unique_ptr<lt::disk_interface> customPosixDiskIOConstructor(
         lt::io_context &ioContext, const lt::settings_interface &settings, lt::counters &counters)
 {
-    return std::make_unique<CustomDiskIOThread>(lt::posix_disk_io_constructor(ioContext, settings, counters));
+    return std::make_unique<CustomDiskIOThread>(lt::posix_disk_io_constructor(ioContext, settings, counters), ioContext);
 }
 
 std::unique_ptr<lt::disk_interface> customMMapDiskIOConstructor(
         lt::io_context &ioContext, const lt::settings_interface &settings, lt::counters &counters)
 {
-    return std::make_unique<CustomDiskIOThread>(lt::mmap_disk_io_constructor(ioContext, settings, counters));
+    return std::make_unique<CustomDiskIOThread>(lt::mmap_disk_io_constructor(ioContext, settings, counters), ioContext);
 }
 
 #if LIBTORRENT_VERSION_NUM >= 20100
 std::unique_ptr<lt::disk_interface> customPreadDiskIOConstructor(
         lt::io_context &ioContext, const lt::settings_interface &settings, lt::counters &counters)
 {
-    return std::make_unique<CustomDiskIOThread>(lt::pread_disk_io_constructor(ioContext, settings, counters));
+    return std::make_unique<CustomDiskIOThread>(lt::pread_disk_io_constructor(ioContext, settings, counters), ioContext);
 }
 #endif
 
-CustomDiskIOThread::CustomDiskIOThread(std::unique_ptr<libtorrent::disk_interface> nativeDiskIOThread)
+CustomDiskIOThread::CustomDiskIOThread(std::unique_ptr<libtorrent::disk_interface> nativeDiskIOThread, lt::io_context &ioc)
     : m_nativeDiskIO {std::move(nativeDiskIOThread)}
+    , m_ioc {ioc}
 {
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    s_activeDiskIO = this;
+}
+
+CustomDiskIOThread::~CustomDiskIOThread()
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    if (s_activeDiskIO == this)
+        s_activeDiskIO = nullptr;
+}
+
+void CustomDiskIOThread::setTorrentStreamMode(const lt::sha1_hash &ih, bool enabled)
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    if (enabled)
+        s_streamModeTorrents.insert(ih);
+    else
+        s_streamModeTorrents.erase(ih);
+
+    if (s_activeDiskIO)
+        s_activeDiskIO->updateTorrentStreamMode(ih, enabled);
+}
+
+bool CustomDiskIOThread::isTorrentStreamMode(const lt::sha1_hash &ih)
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    return s_streamModeTorrents.count(ih) > 0;
+}
+
+lt::piece_index_t CustomDiskIOThread::torrentHeadPiece(const lt::sha1_hash &ih)
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    if (!s_activeDiskIO)
+        return lt::piece_index_t(0);
+
+    std::lock_guard<std::recursive_mutex> storageLock(s_activeDiskIO->m_storageMutex);
+    for (auto it = s_activeDiskIO->m_storageData.begin(); it != s_activeDiskIO->m_storageData.end(); ++it)
+    {
+        if ((it->infoHash == ih) && it->streamStorage)
+            return it->streamStorage->headPiece();
+    }
+    return lt::piece_index_t(0);
+}
+
+std::uint64_t CustomDiskIOThread::torrentStreamedBytes(const lt::sha1_hash &ih)
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    if (!s_activeDiskIO)
+        return 0;
+
+    std::lock_guard<std::recursive_mutex> storageLock(s_activeDiskIO->m_storageMutex);
+    for (auto it = s_activeDiskIO->m_storageData.begin(); it != s_activeDiskIO->m_storageData.end(); ++it)
+    {
+        if ((it->infoHash == ih) && it->streamStorage)
+            return it->streamStorage->totalStreamedBytes();
+    }
+    return 0;
+}
+
+void CustomDiskIOThread::updateTorrentStreamMode(const lt::sha1_hash &ih, bool enabled)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+    for (auto it = m_storageData.begin(); it != m_storageData.end(); ++it)
+    {
+        if (it->infoHash == ih)
+        {
+            if (enabled && !it->streamStorage && it->files.is_valid() && (it->files.num_pieces() > 0))
+            {
+                BitTorrent::StreamOptions opts;
+                const auto *pref = Preferences::instance();
+                opts.maxBufferBytes = static_cast<std::size_t>(pref ? pref->streamRamBufferLimit() : 64) * 1024 * 1024;
+                const std::string hexHash = lt::aux::to_hex(ih);
+                const std::string fifoPath = "/tmp/qbt-stream-" + hexHash + ".fifo";
+                if (!pref || pref->isStreamFifoOutputEnabled())
+                {
+                    ::mkfifo(fifoPath.c_str(), 0666);
+                    ::unlink("/tmp/qbt-stream-latest.fifo");
+                    const int symRes = ::symlink(fifoPath.c_str(), "/tmp/qbt-stream-latest.fifo"); (void)symRes;
+                    opts.fifoPath = fifoPath;
+                }
+
+                const QString sPathQ = it->savePath.toString();
+                opts.targetDirPath = resolveStreamTargetDir(sPathQ, pref);
+                if (opts.targetDirPath.empty())
+                    opts.outputPath = fifoPath;
+                it->streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(it->files, opts);
+            }
+            else if (!enabled && it->streamStorage)
+            {
+                it->streamStorage.reset();
+            }
+            break;
+        }
+    }
 }
 
 lt::storage_holder CustomDiskIOThread::new_torrent(const lt::storage_params &storageParams, const std::shared_ptr<void> &torrent)
 {
-    lt::storage_holder storageHolder = m_nativeDiskIO->new_torrent(storageParams, torrent);
-    m_storageData[storageHolder] =
+    bool isStream = false;
+    {
+        std::lock_guard<std::mutex> lock(s_streamMutex);
+        isStream = (s_streamModeTorrents.count(storageParams.info_hash) > 0);
+    }
+
+    static const std::string dummyPath = "/tmp/qbt-stream-dummy";
+    if (isStream)
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(dummyPath, ec);
+    }
+
+    const std::string &effectivePath = isStream ? dummyPath : storageParams.path;
+#if LIBTORRENT_VERSION_NUM >= 20100
+    const lt::storage_params nativeParams(
+        storageParams.files,
+        storageParams.renamed_files,
+        effectivePath,
+        storageParams.mode,
+        storageParams.priorities,
+        storageParams.info_hash);
+#else
+    const lt::storage_params nativeParams(
+        storageParams.files,
+        storageParams.mapped_files,
+        effectivePath,
+        storageParams.mode,
+        storageParams.priorities,
+        storageParams.info_hash);
+#endif
+
+    lt::storage_holder storageHolder = m_nativeDiskIO->new_torrent(nativeParams, torrent);
+    const lt::storage_index_t storageIndex = static_cast<lt::storage_index_t>(storageHolder);
+    StorageData data
     {
         .savePath = Path(storageParams.path),
 #if LIBTORRENT_VERSION_NUM >= 20100
@@ -84,20 +250,73 @@ lt::storage_holder CustomDiskIOThread::new_torrent(const lt::storage_params &sto
 #else
         .files = storageParams.mapped_files ? *storageParams.mapped_files : storageParams.files,
 #endif
-        .filePriorities = storageParams.priorities
+        .filePriorities = storageParams.priorities,
+        .infoHash = storageParams.info_hash,
+        .streamStorage = nullptr,
+        .nativeHolder = std::make_shared<lt::storage_holder>(std::move(storageHolder))
     };
-    return storageHolder;
+
+    {
+        std::lock_guard<std::mutex> lock(s_streamMutex);
+        if (isStream && data.files.is_valid() && (data.files.num_pieces() > 0))
+        {
+            BitTorrent::StreamOptions opts;
+            const auto *pref = Preferences::instance();
+            opts.maxBufferBytes = static_cast<std::size_t>(pref ? pref->streamRamBufferLimit() : 64) * 1024 * 1024;
+            const std::string hexHash = lt::aux::to_hex(storageParams.info_hash);
+            const std::string fifoPath = "/tmp/qbt-stream-" + hexHash + ".fifo";
+            if (!pref || pref->isStreamFifoOutputEnabled())
+            {
+                ::mkfifo(fifoPath.c_str(), 0666);
+                ::unlink("/tmp/qbt-stream-latest.fifo");
+                const int symRes = ::symlink(fifoPath.c_str(), "/tmp/qbt-stream-latest.fifo");
+                (void)symRes;
+                opts.fifoPath = fifoPath;
+            }
+            opts.targetDirPath = resolveStreamTargetDir(QString::fromStdString(storageParams.path), pref);
+            if (opts.targetDirPath.empty())
+                opts.outputPath = fifoPath;
+            data.streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(data.files, opts);
+        }
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        m_storageData[storageIndex] = std::move(data);
+    }
+
+    return lt::storage_holder(storageIndex, *this);
 }
 
 void CustomDiskIOThread::remove_torrent(lt::storage_index_t storage)
 {
-    m_nativeDiskIO->remove_torrent(storage);
+    std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+    m_storageData.remove(storage);
 }
 
 void CustomDiskIOThread::async_read(lt::storage_index_t storage, const lt::peer_request &peerRequest
                                     , std::function<void (lt::disk_buffer_holder, const lt::storage_error &)> handler
                                     , lt::disk_job_flags_t flags)
 {
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        auto it = m_storageData.find(storage);
+        if (it != m_storageData.end())
+            streamStorage = it->streamStorage;
+    }
+
+    if (streamStorage)
+    {
+        lt::storage_error ec;
+        ec.operation = lt::operation_t::file_read;
+        ec.ec = boost::asio::error::operation_aborted;
+        lt::post(m_ioc, [handler = std::move(handler), ec] {
+            handler(lt::disk_buffer_holder(), ec);
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_read(storage, peerRequest, std::move(handler), flags);
 }
 
@@ -105,6 +324,24 @@ bool CustomDiskIOThread::async_write(lt::storage_index_t storage, const lt::peer
                                      , const char *buf, std::shared_ptr<lt::disk_observer> diskObserver
                                      , std::function<void (const lt::storage_error &)> handler, lt::disk_job_flags_t flags)
 {
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        auto it = m_storageData.find(storage);
+        if (it != m_storageData.end())
+            streamStorage = it->streamStorage;
+    }
+
+    if (streamStorage)
+    {
+        streamStorage->writev(lt::span<const char>(buf, peerRequest.length), peerRequest.piece, peerRequest.start);
+        streamStorage->tryFlushAndEvict();
+        lt::post(m_ioc, [handler = std::move(handler)] {
+            handler(lt::storage_error());
+        });
+        return streamStorage->isWriteQueueFull();
+    }
+
     return m_nativeDiskIO->async_write(storage, peerRequest, buf, std::move(diskObserver), std::move(handler), flags);
 }
 
@@ -112,6 +349,24 @@ void CustomDiskIOThread::async_hash(lt::storage_index_t storage, lt::piece_index
                                     , lt::span<lt::sha256_hash> hash, lt::disk_job_flags_t flags
                                     , std::function<void (lt::piece_index_t, const lt::sha1_hash &, const lt::storage_error &)> handler)
 {
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        auto it = m_storageData.find(storage);
+        if (it != m_storageData.end())
+            streamStorage = it->streamStorage;
+    }
+
+    if (streamStorage)
+    {
+        lt::storage_error ec;
+        const lt::sha1_hash hashVal = streamStorage->hash(piece, hash, ec);
+        lt::post(m_ioc, [=, handler = std::move(handler)] {
+            handler(piece, hashVal, ec);
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_hash(storage, piece, hash, flags, std::move(handler));
 }
 
@@ -119,6 +374,24 @@ void CustomDiskIOThread::async_hash2(lt::storage_index_t storage, lt::piece_inde
                                      , int offset, lt::disk_job_flags_t flags
                                      , std::function<void (lt::piece_index_t, const lt::sha256_hash &, const lt::storage_error &)> handler)
 {
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        auto it = m_storageData.find(storage);
+        if (it != m_storageData.end())
+            streamStorage = it->streamStorage;
+    }
+
+    if (streamStorage)
+    {
+        lt::storage_error ec;
+        const lt::sha256_hash hashVal = streamStorage->hash2(piece, offset, ec);
+        lt::post(m_ioc, [=, handler = std::move(handler)] {
+            handler(piece, hashVal, ec);
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_hash2(storage, piece, offset, flags, std::move(handler));
 }
 
@@ -133,12 +406,15 @@ void CustomDiskIOThread::async_move_storage(lt::storage_index_t storage, std::st
     m_nativeDiskIO->async_move_storage(storage, path, flags
             , [=, this, handler = std::move(handler)](lt::status_t status, const std::string &path, const lt::storage_error &error)
     {
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
 #if LIBTORRENT_VERSION_NUM < 20100
-        if ((status != lt::status_t::fatal_disk_error) && (status != lt::status_t::file_exist))
+            if ((status != lt::status_t::fatal_disk_error) && (status != lt::status_t::file_exist))
 #else
-        if ((status != lt::disk_status::fatal_disk_error) && (status != lt::disk_status::file_exist))
+            if ((status != lt::disk_status::fatal_disk_error) && (status != lt::disk_status::file_exist))
 #endif
-            m_storageData[storage].savePath = newSavePath;
+                m_storageData[storage].savePath = newSavePath;
+        }
 
         handler(status, path, error);
     });
@@ -146,6 +422,21 @@ void CustomDiskIOThread::async_move_storage(lt::storage_index_t storage, std::st
 
 void CustomDiskIOThread::async_release_files(lt::storage_index_t storage, std::function<void ()> handler)
 {
+    bool hasStream = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
+            hasStream = true;
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [handler = std::move(handler)] {
+            handler();
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_release_files(storage, std::move(handler));
 }
 
@@ -153,27 +444,79 @@ void CustomDiskIOThread::async_check_files(lt::storage_index_t storage, const lt
                                            , lt::aux::vector<std::string, lt::file_index_t> links
                                            , std::function<void (lt::status_t, const lt::storage_error &)> handler)
 {
-    handleCompleteFiles(storage, m_storageData[storage].savePath);
+    bool hasStream = false;
+    Path sPath;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage))
+        {
+            hasStream = (m_storageData[storage].streamStorage != nullptr);
+            sPath = m_storageData[storage].savePath;
+        }
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [handler = std::move(handler)] {
+            handler(lt::status_t::no_error, lt::storage_error{});
+        });
+        return;
+    }
+
+    handleCompleteFiles(storage, sPath);
     m_nativeDiskIO->async_check_files(storage, resume_data, std::move(links), std::move(handler));
 }
 
 void CustomDiskIOThread::async_stop_torrent(lt::storage_index_t storage, std::function<void ()> handler)
 {
+    bool hasStream = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
+            hasStream = true;
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [handler = std::move(handler)] {
+            handler();
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_stop_torrent(storage, std::move(handler));
 }
 
 void CustomDiskIOThread::async_rename_file(lt::storage_index_t storage, lt::file_index_t index, std::string name
                                            , std::function<void (const std::string &, lt::file_index_t, const lt::storage_error &)> handler)
 {
+    bool hasStream = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
+            hasStream = true;
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [=, handler = std::move(handler)] {
+            handler(name, index, lt::storage_error{});
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_rename_file(storage, index, name
             , [=, this, handler = std::move(handler)](const std::string &name, lt::file_index_t index, const lt::storage_error &error)
     {
         if (!error)
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
 #if LIBTORRENT_VERSION_NUM >= 20100
             m_storageData[storage].renamedFiles.rename_file(m_storageData[storage].files, index, name);
 #else
             m_storageData[storage].files.rename_file(index, name);
 #endif
+        }
         handler(name, index, error);
     });
 }
@@ -181,16 +524,49 @@ void CustomDiskIOThread::async_rename_file(lt::storage_index_t storage, lt::file
 void CustomDiskIOThread::async_delete_files(lt::storage_index_t storage, lt::remove_flags_t options
                                             , std::function<void (const lt::storage_error &)> handler)
 {
+    bool hasStream = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
+            hasStream = true;
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [handler = std::move(handler)] {
+            handler(lt::storage_error{});
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_delete_files(storage, options, std::move(handler));
 }
 
 void CustomDiskIOThread::async_set_file_priority(lt::storage_index_t storage, lt::aux::vector<lt::download_priority_t, lt::file_index_t> priorities
                                                  , std::function<void (const lt::storage_error &, lt::aux::vector<lt::download_priority_t, lt::file_index_t>)> handler)
 {
+    bool hasStream = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
+            hasStream = true;
+    }
+
+    if (hasStream)
+    {
+        lt::post(m_ioc, [=, handler = std::move(handler)] {
+            handler(lt::storage_error{}, priorities);
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_set_file_priority(storage, std::move(priorities)
             , [=, this, handler = std::move(handler)](const lt::storage_error &error, const lt::aux::vector<lt::download_priority_t, lt::file_index_t> &priorities)
     {
-        m_storageData[storage].filePriorities = priorities;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+            m_storageData[storage].filePriorities = priorities;
+        }
         handler(error, priorities);
     });
 }
@@ -198,6 +574,23 @@ void CustomDiskIOThread::async_set_file_priority(lt::storage_index_t storage, lt
 void CustomDiskIOThread::async_clear_piece(lt::storage_index_t storage, lt::piece_index_t index
                                            , std::function<void (lt::piece_index_t)> handler)
 {
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        auto it = m_storageData.find(storage);
+        if (it != m_storageData.end())
+            streamStorage = it->streamStorage;
+    }
+
+    if (streamStorage)
+    {
+        streamStorage->clearPiece(index);
+        lt::post(m_ioc, [=, handler = std::move(handler)] {
+            handler(index);
+        });
+        return;
+    }
+
     m_nativeDiskIO->async_clear_piece(storage, index, std::move(handler));
 }
 
@@ -228,11 +621,19 @@ void CustomDiskIOThread::settings_updated()
 
 void CustomDiskIOThread::handleCompleteFiles(lt::storage_index_t storage, const Path &savePath)
 {
-    const StorageData storageData = m_storageData[storage];
+    StorageData storageData;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
+        if (!m_storageData.contains(storage))
+            return;
+        storageData = m_storageData[storage];
+    }
 #if LIBTORRENT_VERSION_NUM >= 20100
     const lt::filenames fileNames {storageData.files, storageData.renamedFiles};
     const auto &fileStorage = fileNames;
 #else
+    const lt::file_storage &fileStorage = storageData.files;
+#endif
     const lt::file_storage &fileStorage = storageData.files;
 #endif
     for (const lt::file_index_t fileIndex : fileStorage.file_range())

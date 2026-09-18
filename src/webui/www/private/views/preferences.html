@@ -1293,6 +1293,38 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
                         </select>
                     </td>
                 </tr>
+                                <tr id="rowStartSessionPaused">
+                    <td>
+                        <label for="startSessionPaused">QBT_TR(Start BitTorrent session in paused state:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="checkbox" id="startSessionPaused">
+                    </td>
+                </tr>
+                <tr id="rowSessionShutdownTimeout">
+                    <td>
+                        <label for="sessionShutdownTimeout">QBT_TR(BitTorrent session shutdown timeout:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="number" id="sessionShutdownTimeout" min="-1" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds (-1: unlimited))QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr id="rowConfirmRemoveAllTags">
+                    <td>
+                        <label for="confirmRemoveAllTags">QBT_TR(Confirm removal of all tags:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="checkbox" id="confirmRemoveAllTags">
+                    </td>
+                </tr>
+                <tr id="rowConfirmRemoveTrackerFromAllTorrents">
+                    <td>
+                        <label for="confirmRemoveTrackerFromAllTorrents">QBT_TR(Confirm removal of tracker from all torrents:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="checkbox" id="confirmRemoveTrackerFromAllTorrents">
+                    </td>
+                </tr>
                 <tr id="rowMemoryWorkingSetLimit">
                     <td>
                         <label for="memoryWorkingSetLimit">QBT_TR(Physical memory (RAM) usage limit:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://wikipedia.org/wiki/Working_set" target="_blank">(?)</a></label>
@@ -1466,10 +1498,130 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
             </tbody>
         </table>
     </fieldset>
+
+    <fieldset class="settings">
+        <legend>QBT_TR(Sliding-Window Streaming Engine)QBT_TR[CONTEXT=OptionsDialog]</legend>
+        <table>
+            <tbody>
+                <tr>
+                    <td>
+                        <label for="streamSlidingWindowSize">QBT_TR(Sliding window size (pieces):)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="number" id="streamSlidingWindowSize" min="4" max="256" style="width: 15em;">&nbsp;&nbsp;QBT_TR(pieces)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamRamBufferLimit">QBT_TR(RAM buffer limit for streaming:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="number" id="streamRamBufferLimit" min="16" max="2048" style="width: 15em;">&nbsp;&nbsp;QBT_TR(MiB)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamDefaultEnabled">QBT_TR(Default stream mode for new torrents:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="checkbox" id="streamDefaultEnabled">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamTargetPaths">QBT_TR(Target direct cloud directories (comma-separated):)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="text" id="streamTargetPaths" style="width: 32em;" placeholder="/mnt/cloud-remote,/mnt/storage,/mnt/gdrive">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamFifoOutputEnabled">QBT_TR(Enable FIFO pipes for external media players (/tmp/qbt-stream-*.fifo):)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="checkbox" id="streamFifoOutputEnabled">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamPieceDeadlineStepMs">QBT_TR(Piece deadline step interval:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="number" id="streamPieceDeadlineStepMs" min="10" max="1000" style="width: 15em;">&nbsp;&nbsp;QBT_TR(ms)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="streamVfsRefreshUrl">QBT_TR(Rclone VFS refresh webhook URL on completion:)QBT_TR[CONTEXT=OptionsDialog]</label>
+                    </td>
+                    <td>
+                        <input type="text" id="streamVfsRefreshUrl" style="width: 32em;" placeholder="http://127.0.0.1:5573/vfs/refresh">
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </fieldset>
     <fieldset class="settings">
         <legend>QBT_TR(libtorrent Section)QBT_TR[CONTEXT=OptionsDialog]&nbsp;(<a href="https://www.libtorrent.org/reference-Settings.html" target="_blank">QBT_TR(Open documentation)QBT_TR[CONTEXT=HttpServer]</a>)</legend>
         <table>
             <tbody>
+                <tr>
+                    <td>
+                        <label for="peerConnectTimeout">QBT_TR(Peer connection timeout:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#peer_connect_timeout" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="peerConnectTimeout" min="1" max="600" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="requestTimeout">QBT_TR(Piece request timeout:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#request_timeout" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="requestTimeout" min="2" max="600" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="inactivityTimeout">QBT_TR(Peer inactivity timeout:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#inactivity_timeout" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="inactivityTimeout" min="5" max="3600" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="handshakeTimeout">QBT_TR(Peer handshake timeout:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#handshake_timeout" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="handshakeTimeout" min="1" max="120" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="maxPeerlistSize">QBT_TR(Maximum peer list size per torrent:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#max_peerlist_size" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="maxPeerlistSize" min="10" max="50000" style="width: 15em;">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="maxWebSeedConnections">QBT_TR(Maximum web seed connections:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#max_web_seed_connections" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="maxWebSeedConnections" min="1" max="200" style="width: 15em;">
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <label for="trackerCompletionTimeout">QBT_TR(Tracker announce timeout:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Settings.html#tracker_completion_timeout" target="_blank">(?)</a></label>
+                    </td>
+                    <td>
+                        <input type="number" id="trackerCompletionTimeout" min="1" max="600" style="width: 15em;">&nbsp;&nbsp;QBT_TR(seconds)QBT_TR[CONTEXT=OptionsDialog]
+                    </td>
+                </tr>
                 <tr>
                     <td>
                         <label for="bdecodeDepthLimit">QBT_TR(Bdecode depth limit:)QBT_TR[CONTEXT=OptionsDialog]&nbsp;<a href="https://www.libtorrent.org/reference-Bdecoding.html#bdecode()" target="_blank">(?)</a></label>
@@ -1946,7 +2098,7 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
     </fieldset>
 </div>
 
-<div style="text-align: center; margin-top: 1em;"><input type="button" value="QBT_TR(Save)QBT_TR[CONTEXT=HttpServer]" onclick="qBittorrent.Preferences.applyPreferences();"></div>
+<div style="position: sticky; bottom: 0; background: var(--color-background-default); padding: 12px 0; text-align: center; border-top: 1px solid var(--color-border-default); z-index: 100; box-shadow: 0 -2px 5px rgba(0,0,0,0.1);"><input type="button" style="padding: 6px 30px; font-weight: bold; font-size: 13px; cursor: pointer;" value="QBT_TR(Save)QBT_TR[CONTEXT=HttpServer]" onclick="qBittorrent.Preferences.applyPreferences();"></div>
 
 <script>
     "use strict";
@@ -2833,6 +2985,30 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
 
                     // Advanced settings
                     // qBittorrent section
+                    // Additional qBittorrent settings
+                    document.getElementById("startSessionPaused").checked = Boolean(pref.start_session_paused);
+                    document.getElementById("sessionShutdownTimeout").value = (pref.session_shutdown_timeout !== undefined) ? pref.session_shutdown_timeout : -1;
+                    document.getElementById("confirmRemoveAllTags").checked = (pref.confirm_remove_all_tags !== undefined) ? pref.confirm_remove_all_tags : true;
+                    document.getElementById("confirmRemoveTrackerFromAllTorrents").checked = (pref.confirm_remove_tracker_from_all_torrents !== undefined) ? pref.confirm_remove_tracker_from_all_torrents : true;
+
+                    // Sliding-Window Streaming Engine
+                    document.getElementById("streamSlidingWindowSize").value = (pref.stream_sliding_window_size !== undefined) ? pref.stream_sliding_window_size : 32;
+                    document.getElementById("streamRamBufferLimit").value = (pref.stream_ram_buffer_limit !== undefined) ? pref.stream_ram_buffer_limit : 64;
+                    document.getElementById("streamDefaultEnabled").checked = Boolean(pref.stream_default_enabled);
+                    document.getElementById("streamTargetPaths").value = pref.stream_target_paths || "/mnt/cloud-remote,/mnt/storage,/mnt/gdrive";
+                    document.getElementById("streamFifoOutputEnabled").checked = (pref.stream_fifo_output_enabled !== undefined) ? pref.stream_fifo_output_enabled : true;
+                    document.getElementById("streamPieceDeadlineStepMs").value = (pref.stream_piece_deadline_step_ms !== undefined) ? pref.stream_piece_deadline_step_ms : 50;
+                    document.getElementById("streamVfsRefreshUrl").value = pref.stream_vfs_refresh_url || "http://127.0.0.1:5573/vfs/refresh";
+
+                    // Additional libtorrent settings
+                    document.getElementById("peerConnectTimeout").value = (pref.peer_connect_timeout !== undefined) ? pref.peer_connect_timeout : 15;
+                    document.getElementById("requestTimeout").value = (pref.request_timeout !== undefined) ? pref.request_timeout : 20;
+                    document.getElementById("inactivityTimeout").value = (pref.inactivity_timeout !== undefined) ? pref.inactivity_timeout : 60;
+                    document.getElementById("handshakeTimeout").value = (pref.handshake_timeout !== undefined) ? pref.handshake_timeout : 10;
+                    document.getElementById("maxPeerlistSize").value = (pref.max_peerlist_size !== undefined) ? pref.max_peerlist_size : 4000;
+                    document.getElementById("maxWebSeedConnections").value = (pref.max_web_seed_connections !== undefined) ? pref.max_web_seed_connections : 30;
+                    document.getElementById("trackerCompletionTimeout").value = (pref.tracker_completion_timeout !== undefined) ? pref.tracker_completion_timeout : 30;
+
                     document.getElementById("resumeDataStorageType").value = pref.resume_data_storage_type;
                     document.getElementById("torrentContentRemoveOption").value = pref.torrent_content_remove_option;
                     document.getElementById("memoryWorkingSetLimit").value = pref.memory_working_set_limit;
@@ -3333,6 +3509,30 @@ Use ';' to split multiple entries. Can use wildcard '*'.)QBT_TR[CONTEXT=OptionsD
 
             // Update advanced settings
             // qBittorrent section
+            // Additional qBittorrent settings
+            settings["start_session_paused"] = document.getElementById("startSessionPaused").checked;
+            settings["session_shutdown_timeout"] = Number(document.getElementById("sessionShutdownTimeout").value);
+            settings["confirm_remove_all_tags"] = document.getElementById("confirmRemoveAllTags").checked;
+            settings["confirm_remove_tracker_from_all_torrents"] = document.getElementById("confirmRemoveTrackerFromAllTorrents").checked;
+
+            // Sliding-Window Streaming Engine
+            settings["stream_sliding_window_size"] = Number(document.getElementById("streamSlidingWindowSize").value);
+            settings["stream_ram_buffer_limit"] = Number(document.getElementById("streamRamBufferLimit").value);
+            settings["stream_default_enabled"] = document.getElementById("streamDefaultEnabled").checked;
+            settings["stream_target_paths"] = document.getElementById("streamTargetPaths").value;
+            settings["stream_fifo_output_enabled"] = document.getElementById("streamFifoOutputEnabled").checked;
+            settings["stream_piece_deadline_step_ms"] = Number(document.getElementById("streamPieceDeadlineStepMs").value);
+            settings["stream_vfs_refresh_url"] = document.getElementById("streamVfsRefreshUrl").value;
+
+            // Additional libtorrent settings
+            settings["peer_connect_timeout"] = Number(document.getElementById("peerConnectTimeout").value);
+            settings["request_timeout"] = Number(document.getElementById("requestTimeout").value);
+            settings["inactivity_timeout"] = Number(document.getElementById("inactivityTimeout").value);
+            settings["handshake_timeout"] = Number(document.getElementById("handshakeTimeout").value);
+            settings["max_peerlist_size"] = Number(document.getElementById("maxPeerlistSize").value);
+            settings["max_web_seed_connections"] = Number(document.getElementById("maxWebSeedConnections").value);
+            settings["tracker_completion_timeout"] = Number(document.getElementById("trackerCompletionTimeout").value);
+
             settings["resume_data_storage_type"] = document.getElementById("resumeDataStorageType").value;
             settings["torrent_content_remove_option"] = document.getElementById("torrentContentRemoveOption").value;
             settings["memory_working_set_limit"] = Number(document.getElementById("memoryWorkingSetLimit").value);

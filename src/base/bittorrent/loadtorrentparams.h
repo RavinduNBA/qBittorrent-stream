@@ -55,6 +55,7 @@ namespace BitTorrent
         TorrentOperatingMode operatingMode = TorrentOperatingMode::AutoManaged;
         bool useAutoTMM = false;
         bool firstLastPiecePriority = false;
+        bool streamMode = false;
         bool hasFinishedStatus = false;
         bool stopped = false;
         Torrent::StopCondition stopCondition = Torrent::StopCondition::None;

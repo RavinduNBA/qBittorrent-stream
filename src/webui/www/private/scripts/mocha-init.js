@@ -117,6 +117,7 @@ let uploadLimitFN = () => {};
 let shareRatioFN = () => {};
 let toggleSequentialDownloadFN = () => {};
 let toggleFirstLastPiecePrioFN = () => {};
+let toggleStreamModeFN = () => {};
 let setSuperSeedingFN = () => {};
 let setForceStartFN = () => {};
 let StatisticsLinkFN = () => {};
@@ -267,12 +268,12 @@ const initializeWindows = () => {
                 css: ["css/Tabs.css?v=${CACHEID}"]
             },
             toolbarURL: "views/preferencesToolbar.html?v=${CACHEID}",
-            maximizable: false,
+            maximizable: true,
             closable: true,
             paddingVertical: 0,
             paddingHorizontal: 0,
-            width: loadWindowWidth(id, 730),
-            height: loadWindowHeight(id, 600),
+            width: loadWindowWidth(id, 820),
+            height: loadWindowHeight(id, 680),
             onResize: window.qBittorrent.Misc.createDebounceHandler(500, (e) => {
                 saveWindowSize(id);
             })
@@ -434,6 +435,19 @@ const initializeWindows = () => {
         const hashes = torrentsTable.selectedRowsIds();
         if (hashes.length) {
             fetch("api/v2/torrents/toggleFirstLastPiecePrio", {
+                method: "POST",
+                body: new URLSearchParams({
+                    hashes: hashes.join("|")
+                })
+            });
+            updateMainData();
+        }
+    };
+
+    toggleStreamModeFN = () => {
+        const hashes = torrentsTable.selectedRowsIds();
+        if (hashes.length) {
+            fetch("api/v2/torrents/toggleStreamMode", {
                 method: "POST",
                 body: new URLSearchParams({
                     hashes: hashes.join("|")

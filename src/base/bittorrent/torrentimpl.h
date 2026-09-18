@@ -173,6 +173,7 @@ namespace BitTorrent
         bool isInactive() const override;
         bool isErrored() const override;
         bool isSequentialDownload() const override;
+        bool isStreamMode() const override;
         bool hasFirstLastPiecePriority() const override;
         TorrentState state() const override;
         bool hasMetadata() const override;
@@ -213,6 +214,7 @@ namespace BitTorrent
 
         void setName(const QString &name) override;
         void setSequentialDownload(bool enable) override;
+        void setStreamMode(bool enable) override;
         void setFirstLastPiecePriority(bool enabled) override;
         void stop() override;
         void start(TorrentOperatingMode mode = TorrentOperatingMode::AutoManaged) override;
@@ -317,6 +319,10 @@ namespace BitTorrent
         void moveStorage(const Path &newPath, MoveStorageContext context);
         void manageActualFilePaths();
         void applyFirstLastPiecePriority(bool enabled);
+        void applyStreamSlidingWindow();
+    public:
+        void onStreamPieceFinished(lt::piece_index_t piece);
+    private:
 
         void prepareResumeData(lt::add_torrent_params resumeData);
         void endReceivedMetadataHandling(const Path &savePath, const PathList &fileNames);
@@ -378,6 +384,7 @@ namespace BitTorrent
         bool m_hasFinishedStatus = false;
         bool m_hasMissingFiles = false;
         bool m_hasFirstLastPiecePriority = false;
+        bool m_streamMode = false;
         bool m_useAutoTMM = false;
         bool m_isStopped = false;
         StopCondition m_stopCondition = StopCondition::None;

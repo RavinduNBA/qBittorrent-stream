@@ -441,6 +441,30 @@ void AppController::preferencesAction()
     // Session shutdown timeout
     data[u"shutdown_timeout"_s] = session->shutdownTimeout();
 
+    // Sliding-Window Streaming Engine
+    data[u"stream_sliding_window_size"_s] = pref->streamSlidingWindowSize();
+    data[u"stream_ram_buffer_limit"_s] = pref->streamRamBufferLimit();
+    data[u"stream_default_enabled"_s] = pref->isStreamDefaultEnabled();
+    data[u"stream_target_paths"_s] = pref->streamTargetPaths();
+    data[u"stream_fifo_output_enabled"_s] = pref->isStreamFifoOutputEnabled();
+    data[u"stream_piece_deadline_step_ms"_s] = pref->streamPieceDeadlineStepMs();
+    data[u"stream_vfs_refresh_url"_s] = pref->streamVfsRefreshUrl();
+
+    // Additional qBittorrent settings
+    data[u"start_session_paused"_s] = session->isStartPaused();
+    data[u"session_shutdown_timeout"_s] = session->shutdownTimeout();
+    data[u"confirm_remove_all_tags"_s] = pref->confirmRemoveAllTags();
+    data[u"confirm_remove_tracker_from_all_torrents"_s] = pref->confirmRemoveTrackerFromAllTorrents();
+
+    // Additional libtorrent settings
+    data[u"peer_connect_timeout"_s] = session->peerConnectTimeout();
+    data[u"request_timeout"_s] = session->requestTimeout();
+    data[u"inactivity_timeout"_s] = session->inactivityTimeout();
+    data[u"handshake_timeout"_s] = session->handshakeTimeout();
+    data[u"max_peerlist_size"_s] = session->maxPeerlistSize();
+    data[u"max_web_seed_connections"_s] = session->maxWebSeedConnections();
+    data[u"tracker_completion_timeout"_s] = session->trackerCompletionTimeout();
+
     // libtorrent preferences
     // Bdecode depth limit
     data[u"bdecode_depth_limit"_s] = pref->getBdecodeDepthLimit();
@@ -1116,6 +1140,48 @@ void AppController::setPreferencesAction()
         if (ok && (timeout >= -1))
             session->setShutdownTimeout(timeout);
     }
+
+    // Sliding-Window Streaming Engine
+    if (hasKey(u"stream_sliding_window_size"_s))
+        pref->setStreamSlidingWindowSize(it.value().toInt());
+    if (hasKey(u"stream_ram_buffer_limit"_s))
+        pref->setStreamRamBufferLimit(it.value().toInt());
+    if (hasKey(u"stream_default_enabled"_s))
+        pref->setStreamDefaultEnabled(it.value().toBool());
+    if (hasKey(u"stream_target_paths"_s))
+        pref->setStreamTargetPaths(it.value().toString());
+    if (hasKey(u"stream_fifo_output_enabled"_s))
+        pref->setStreamFifoOutputEnabled(it.value().toBool());
+    if (hasKey(u"stream_piece_deadline_step_ms"_s))
+        pref->setStreamPieceDeadlineStepMs(it.value().toInt());
+    if (hasKey(u"stream_vfs_refresh_url"_s))
+        pref->setStreamVfsRefreshUrl(it.value().toString());
+
+    // Additional qBittorrent settings
+    if (hasKey(u"start_session_paused"_s))
+        session->setStartPaused(it.value().toBool());
+    if (hasKey(u"session_shutdown_timeout"_s))
+        session->setShutdownTimeout(it.value().toInt());
+    if (hasKey(u"confirm_remove_all_tags"_s))
+        pref->setConfirmRemoveAllTags(it.value().toBool());
+    if (hasKey(u"confirm_remove_tracker_from_all_torrents"_s))
+        pref->setConfirmRemoveTrackerFromAllTorrents(it.value().toBool());
+
+    // Additional libtorrent settings
+    if (hasKey(u"peer_connect_timeout"_s))
+        session->setPeerConnectTimeout(it.value().toInt());
+    if (hasKey(u"request_timeout"_s))
+        session->setRequestTimeout(it.value().toInt());
+    if (hasKey(u"inactivity_timeout"_s))
+        session->setInactivityTimeout(it.value().toInt());
+    if (hasKey(u"handshake_timeout"_s))
+        session->setHandshakeTimeout(it.value().toInt());
+    if (hasKey(u"max_peerlist_size"_s))
+        session->setMaxPeerlistSize(it.value().toInt());
+    if (hasKey(u"max_web_seed_connections"_s))
+        session->setMaxWebSeedConnections(it.value().toInt());
+    if (hasKey(u"tracker_completion_timeout"_s))
+        session->setTrackerCompletionTimeout(it.value().toInt());
 
     // libtorrent preferences
     // Bdecode depth limit
