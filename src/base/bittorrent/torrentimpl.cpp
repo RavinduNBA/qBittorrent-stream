@@ -496,7 +496,7 @@ qlonglong TorrentImpl::completedSize() const
 {
     if (m_streamMode)
     {
-        if (isFinished() || m_hasFinishedStatus)
+        if (isFinished())
             return totalSize();
 #ifdef QBT_USES_LIBTORRENT2
         const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
@@ -951,7 +951,7 @@ int TorrentImpl::piecesHave() const
 {
     if (m_streamMode)
     {
-        if (isFinished() || m_hasFinishedStatus)
+        if (isFinished())
             return piecesCount();
 #ifdef QBT_USES_LIBTORRENT2
         const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
@@ -972,7 +972,7 @@ qreal TorrentImpl::progress() const
 
     if (m_streamMode)
     {
-        if (isFinished() || m_hasFinishedStatus)
+        if (isFinished())
             return 1.;
         const qlonglong total = totalSize();
         if (total <= 0)
@@ -1320,8 +1320,9 @@ bool TorrentImpl::isFinished() const
         const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
         const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
         const int headIdx = static_cast<int>(::CustomDiskIOThread::torrentHeadPiece(ih));
-        if (headIdx >= m_torrentInfo.piecesCount())
-            return true;
+        return headIdx >= m_torrentInfo.piecesCount();
+#else
+        return false;
 #endif
     }
     return ((m_nativeStatus.state == lt::torrent_status::finished)
@@ -1555,7 +1556,7 @@ QList<qreal> TorrentImpl::filesProgress() const
     if (count != filesCount()) [[unlikely]]
         return {};
 
-    if (m_completedFiles.count(true) == count || (m_streamMode && isFinished()))
+    if ((!m_streamMode && (m_completedFiles.count(true) == count)) || (m_streamMode && isFinished()))
         return QList<qreal>(count, 1);
 
     if (m_streamMode)
@@ -1922,7 +1923,7 @@ void TorrentImpl::applyStreamSlidingWindow()
     const int endIdx = std::min(headIdx + windowSize, totalPieces);
     const int deadlineStep = Preferences::instance()->streamPieceDeadlineStepMs();
 
-    std::vector<lt::download_priority_t> prios(totalPieces, lt::low_priority);
+    std::vector<lt::download_priority_t> prios(totalPieces, lt::dont_download);
     for (int i = headIdx; i < endIdx; ++i)
     {
         prios[i] = lt::top_priority;
@@ -1948,6 +1949,7 @@ void TorrentImpl::onStreamPieceFinished(lt::piece_index_t piece)
     ::CustomDiskIOThread::markTorrentPieceVerified(ih, piece);
 #endif
 
+    m_nativeHandle.piece_priority(piece, lt::dont_download);
     m_nativeHandle.reset_piece_deadline(piece);
 
     applyStreamSlidingWindow();
@@ -2372,6 +2374,8 @@ void TorrentImpl::handleTorrentChecked()
 void TorrentImpl::handleTorrentFinished()
 {
     m_hasMissingFiles = false;
+    if (m_streamMode && !isFinished())
+        return;
     if (m_hasFinishedStatus)
         return;
 
