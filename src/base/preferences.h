@@ -373,6 +373,10 @@ public:
     void setStreamTargetPaths(const QString &paths);
     bool isStreamFifoOutputEnabled() const;
     void setStreamFifoOutputEnabled(bool enabled);
+    QString streamCloudRemote() const;
+    void setStreamCloudRemote(const QString &remote);
+    QString streamRcloneConfigPath() const;
+    void setStreamRcloneConfigPath(const QString &path);
     int streamPieceDeadlineStepMs() const;
     void setStreamPieceDeadlineStepMs(int value);
     QString streamVfsRefreshUrl() const;

@@ -430,6 +430,8 @@ void AppController::preferencesAction()
     data[u"stream_default_enabled"_s] = pref->isStreamDefaultEnabled();
     data[u"stream_target_paths"_s] = pref->streamTargetPaths();
     data[u"stream_fifo_output_enabled"_s] = pref->isStreamFifoOutputEnabled();
+    data[u"stream_cloud_remote"_s] = pref->streamCloudRemote();
+    data[u"stream_rclone_config_path"_s] = pref->streamRcloneConfigPath();
     data[u"stream_piece_deadline_step_ms"_s] = pref->streamPieceDeadlineStepMs();
     data[u"stream_vfs_refresh_url"_s] = pref->streamVfsRefreshUrl();
 
@@ -1101,6 +1103,10 @@ void AppController::setPreferencesAction()
         pref->setStreamTargetPaths(it.value().toString());
     if (hasKey(u"stream_fifo_output_enabled"_s))
         pref->setStreamFifoOutputEnabled(it.value().toBool());
+    if (hasKey(u"stream_cloud_remote"_s))
+        pref->setStreamCloudRemote(it.value().toString());
+    if (hasKey(u"stream_rclone_config_path"_s))
+        pref->setStreamRcloneConfigPath(it.value().toString());
     if (hasKey(u"stream_piece_deadline_step_ms"_s))
         pref->setStreamPieceDeadlineStepMs(it.value().toInt());
     if (hasKey(u"stream_vfs_refresh_url"_s))
