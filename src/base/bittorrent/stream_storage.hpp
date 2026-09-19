@@ -49,6 +49,8 @@ namespace BitTorrent
         lt::sha1_hash hash(lt::piece_index_t piece, lt::span<lt::sha256_hash> blockHashes, lt::storage_error &ec);
         lt::sha256_hash hash2(lt::piece_index_t piece, int offset, lt::storage_error &ec);
         void clearPiece(lt::piece_index_t piece);
+        void markPieceVerified(lt::piece_index_t piece);
+        void stop();
 
         void tryFlushAndEvict();
         bool isWriteQueueFull() const;

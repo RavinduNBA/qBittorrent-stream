@@ -169,6 +169,23 @@ std::uint64_t CustomDiskIOThread::torrentStreamedBytes(const lt::sha1_hash &ih)
     return 0;
 }
 
+void CustomDiskIOThread::markTorrentPieceVerified(const lt::sha1_hash &ih, const lt::piece_index_t piece)
+{
+    std::lock_guard<std::mutex> lock(s_streamMutex);
+    if (!s_activeDiskIO)
+        return;
+
+    std::lock_guard<std::recursive_mutex> storageLock(s_activeDiskIO->m_storageMutex);
+    for (auto it = s_activeDiskIO->m_storageData.begin(); it != s_activeDiskIO->m_storageData.end(); ++it)
+    {
+        if ((it->infoHash == ih) && it->streamStorage)
+        {
+            it->streamStorage->markPieceVerified(piece);
+            return;
+        }
+    }
+}
+
 void CustomDiskIOThread::updateTorrentStreamMode(const lt::sha1_hash &ih, bool enabled)
 {
     std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
@@ -424,7 +441,7 @@ void CustomDiskIOThread::async_check_files(lt::storage_index_t storage, const lt
     if (hasStream)
     {
         lt::post(m_ioc, [handler = std::move(handler)] {
-            handler(lt::status_t::need_full_check, lt::storage_error{});
+            handler(lt::status_t::no_error, lt::storage_error{});
         });
         return;
     }
@@ -435,15 +452,16 @@ void CustomDiskIOThread::async_check_files(lt::storage_index_t storage, const lt
 
 void CustomDiskIOThread::async_stop_torrent(lt::storage_index_t storage, std::function<void ()> handler)
 {
-    bool hasStream = false;
+    std::shared_ptr<BitTorrent::SlidingWindowStorage> streamStorage;
     {
         std::lock_guard<std::recursive_mutex> lock(m_storageMutex);
         if (m_storageData.contains(storage) && m_storageData[storage].streamStorage)
-            hasStream = true;
+            streamStorage = m_storageData[storage].streamStorage;
     }
 
-    if (hasStream)
+    if (streamStorage)
     {
+        streamStorage->stop();
         lt::post(m_ioc, [handler = std::move(handler)] {
             handler();
         });

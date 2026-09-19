@@ -173,11 +173,7 @@ namespace BitTorrent
             }
         }
 
-        const lt::sha1_hash result = lt::hasher(slot.data).final();
-        slot.verified = true;
-        lock.unlock();
-        tryFlushAndEvict();
-        return result;
+        return lt::hasher(slot.data).final();
     }
 
     lt::sha256_hash SlidingWindowStorage::hash2(const lt::piece_index_t piece, const int offset, lt::storage_error &error)
@@ -198,6 +194,18 @@ namespace BitTorrent
             return {};
         }
         return lt::hasher256(lt::span<const char> {slot.data.data() + offset, length}).final();
+    }
+
+    void SlidingWindowStorage::markPieceVerified(const lt::piece_index_t piece)
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            const auto it = m_window.find(piece);
+            if (it == m_window.end())
+                return;
+            it->second.verified = true;
+        }
+        tryFlushAndEvict();
     }
 
     bool SlidingWindowStorage::openRemoteFile(const lt::file_index_t file)
@@ -222,7 +230,11 @@ namespace BitTorrent
             ::dup2(pipeFds[0], STDIN_FILENO);
             ::close(pipeFds[0]);
             ::close(pipeFds[1]);
-            const std::string remotePath = m_opts.remoteBasePath + "/" + m_files.file_path(file);
+            std::string filePath = m_files.file_path(file);
+            static const std::string incompleteSuffix = ".!qB";
+            if (filePath.ends_with(incompleteSuffix))
+                filePath.erase(filePath.size() - incompleteSuffix.size());
+            const std::string remotePath = m_opts.remoteBasePath + "/" + filePath;
             const std::string sizeString = std::to_string(m_files.file_size(file));
             ::execl("/usr/bin/rclone", "rclone", "rcat", remotePath.c_str()
                     , "--config", m_opts.rcloneConfigPath.c_str()
@@ -253,6 +265,12 @@ namespace BitTorrent
         m_uploadPid = -1;
         m_openFile = lt::file_index_t {-1};
         return WIFEXITED(status) && (WEXITSTATUS(status) == 0);
+    }
+
+    void SlidingWindowStorage::stop()
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        closeRemoteFile();
     }
 
     bool SlidingWindowStorage::writeTorrentRange(const char *data, const std::size_t size
@@ -327,10 +345,6 @@ namespace BitTorrent
 
         if (pieces.empty())
             return;
-        const bool isLastPiece = (static_cast<int>(pieces.back()) + 1) >= m_totalPieces;
-        if ((size < m_opts.maxBufferBytes) && !isLastPiece)
-            return;
-
         if (!uploadBytes(pieces, size))
             return;
 

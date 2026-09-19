@@ -72,6 +72,7 @@ public:
     static bool isTorrentStreamMode(const lt::sha1_hash &ih);
     static lt::piece_index_t torrentHeadPiece(const lt::sha1_hash &ih);
     static std::uint64_t torrentStreamedBytes(const lt::sha1_hash &ih);
+    static void markTorrentPieceVerified(const lt::sha1_hash &ih, lt::piece_index_t piece);
     void updateTorrentStreamMode(const lt::sha1_hash &ih, bool enabled);
 
     lt::storage_holder new_torrent(const lt::storage_params &storageParams, const std::shared_ptr<void> &torrent) override;
