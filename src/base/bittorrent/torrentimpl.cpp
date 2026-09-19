@@ -1876,7 +1876,7 @@ void TorrentImpl::applyStreamSlidingWindow()
     const int endIdx = std::min(headIdx + windowSize, totalPieces);
     const int deadlineStep = Preferences::instance()->streamPieceDeadlineStepMs();
 
-    std::vector<lt::download_priority_t> prios(totalPieces, lt::dont_download);
+    std::vector<lt::download_priority_t> prios(totalPieces, lt::low_priority);
     for (int i = headIdx; i < endIdx; ++i)
     {
         prios[i] = lt::top_priority;
@@ -1896,7 +1896,12 @@ void TorrentImpl::onStreamPieceFinished(lt::piece_index_t piece)
     if (!m_streamMode || !m_torrentInfo.isValid())
         return;
 
-    m_nativeHandle.piece_priority(piece, lt::dont_download);
+#ifdef QBT_USES_LIBTORRENT2
+    const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
+    const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
+    ::CustomDiskIOThread::markTorrentPieceVerified(ih, piece);
+#endif
+
     m_nativeHandle.reset_piece_deadline(piece);
 
     applyStreamSlidingWindow();
