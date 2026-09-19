@@ -419,6 +419,30 @@ void Preferences::setStreamFifoOutputEnabled(const bool enabled)
     setValue(u"Preferences/Stream/FifoOutputEnabled"_s, enabled);
 }
 
+QString Preferences::streamCloudRemote() const
+{
+    return value(u"Preferences/Stream/CloudRemote"_s, u"gdrive:"_s);
+}
+
+void Preferences::setStreamCloudRemote(const QString &remote)
+{
+    if (remote == streamCloudRemote())
+        return;
+    setValue(u"Preferences/Stream/CloudRemote"_s, remote);
+}
+
+QString Preferences::streamRcloneConfigPath() const
+{
+    return value(u"Preferences/Stream/RcloneConfigPath"_s, u"/root/libtorrent-stream/rclone.conf"_s);
+}
+
+void Preferences::setStreamRcloneConfigPath(const QString &path)
+{
+    if (path == streamRcloneConfigPath())
+        return;
+    setValue(u"Preferences/Stream/RcloneConfigPath"_s, path);
+}
+
 int Preferences::streamPieceDeadlineStepMs() const
 {
     return value(u"Preferences/Stream/PieceDeadlineStepMs"_s, 50);

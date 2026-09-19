@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,12 +21,11 @@ namespace BitTorrent
 {
     struct StreamOptions
     {
-        int outputFd = -1;
-        std::string outputPath = "";
-        std::string fifoPath = "";
-        std::string targetDirPath = "";
-        std::size_t maxBufferBytes = 64 * 1024 * 1024; // 64 MiB RAM sliding window
-        bool closeFdOnExit = false;
+        std::string remoteBasePath;
+        std::string infoHash;
+        std::string manifestDir;
+        std::string rcloneConfigPath;
+        std::size_t maxBufferBytes = 64 * 1024 * 1024;
     };
 
     struct PieceSlot
@@ -52,6 +52,7 @@ namespace BitTorrent
 
         void tryFlushAndEvict();
         bool isWriteQueueFull() const;
+        bool hasCommittedPiece(lt::piece_index_t piece) const;
 
         lt::piece_index_t headPiece() const { return m_headPiece; }
         std::size_t activeBufferedBytes() const;
@@ -60,6 +61,11 @@ namespace BitTorrent
 
     private:
         int calculatePieceSize(lt::piece_index_t piece) const;
+        bool uploadBytes(const std::vector<lt::piece_index_t> &pieces, std::size_t size);
+        bool writeTorrentRange(const char *data, std::size_t size, std::int64_t torrentOffset);
+        bool openRemoteFile(lt::file_index_t file);
+        bool closeRemoteFile();
+        std::optional<lt::sha1_hash> committedPieceHash(lt::piece_index_t piece) const;
 
         lt::file_storage m_files;
         StreamOptions m_opts;
@@ -68,12 +74,11 @@ namespace BitTorrent
         lt::piece_index_t m_headPiece {0};
         int m_totalPieces = 0;
         std::map<lt::piece_index_t, PieceSlot> m_window;
+        std::map<lt::piece_index_t, lt::sha1_hash> m_committedPieceHashes;
 
         std::uint64_t m_totalStreamedBytes = 0;
-        int m_outputFd = -1;
-        int m_fifoFd = -1;
-
-        lt::file_index_t m_currentFileIdx {-1};
-        int m_currentFileFd = -1;
+        lt::file_index_t m_openFile {lt::file_index_t {-1}};
+        int m_uploadFd = -1;
+        int m_uploadPid = -1;
     };
 }

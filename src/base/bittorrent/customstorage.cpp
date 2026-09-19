@@ -1,4 +1,3 @@
-#include "base/preferences.h"
 /*
  * Bittorrent Client using Qt and libtorrent.
  * Copyright (C) 2020  Vladimir Golovnev <glassez@yandex.ru>
@@ -31,6 +30,8 @@
 
 #include <libtorrent/download_priority.hpp>
 
+#include "base/preferences.h"
+#include "base/profile.h"
 #include "base/utils/fs.h"
 #include "common.h"
 
@@ -43,8 +44,6 @@
 #endif
 #include <libtorrent/session.hpp>
 
-#include <sys/stat.h>
-#include <unistd.h>
 #include <mutex>
 #include <set>
 
@@ -54,28 +53,30 @@ namespace
     std::set<lt::sha1_hash> s_streamModeTorrents;
     CustomDiskIOThread *s_activeDiskIO = nullptr;
 
-    std::string resolveStreamTargetDir(const QString &savePath, const Preferences *pref)
+    BitTorrent::StreamOptions makeStreamOptions(const lt::sha1_hash &infoHash, const std::string &savePath)
     {
-        QString s = savePath.trimmed();
-        // Smart path management: If user selected a path under /mnt/storage (mergerfs mount),
-        // redirect stream writes directly to /mnt/rclone-vfs (cloud mount)
-        // so that it streams straight to Google Drive without consuming local disk space.
-        // Because mergerfs merges /mnt/rclone-vfs into /mnt/storage, the file is immediately
-        // visible at the original /mnt/storage location.
-        if (s.startsWith(u"/mnt/storage"))
-        {
-            s.replace(0, 12, u"/mnt/rclone-vfs"_s);
-            return s.toStdString();
-        }
-
-        const QString targetPaths = pref ? pref->streamTargetPaths() : u"/mnt/cloud-remote,/mnt/storage,/mnt/gdrive,/mnt/rclone-vfs"_s;
-        bool isTargetCloud = false;
-        for (const QString &p : targetPaths.split(u',', Qt::SkipEmptyParts)) {
-            if (!p.trimmed().isEmpty() && s.startsWith(p.trimmed())) { isTargetCloud = true; break; }
-        }
-        if (isTargetCloud || targetPaths.trimmed().isEmpty())
-            return s.toStdString();
-        return {};
+        BitTorrent::StreamOptions options;
+        const Preferences *preferences = Preferences::instance();
+        options.maxBufferBytes = static_cast<std::size_t>(preferences
+                ? preferences->streamRamBufferLimit() : 64) * 1024 * 1024;
+        options.infoHash = lt::aux::to_hex(infoHash);
+        std::string relativePath = savePath;
+        static const std::string storagePrefix = "/mnt/storage";
+        if (relativePath.starts_with(storagePrefix))
+            relativePath.erase(0, storagePrefix.size());
+        while (!relativePath.empty() && (relativePath.front() == '/'))
+            relativePath.erase(relativePath.begin());
+        options.remoteBasePath = (preferences
+                ? preferences->streamCloudRemote() : u"gdrive:"_s).toStdString();
+        while (!options.remoteBasePath.empty() && (options.remoteBasePath.back() == '/'))
+            options.remoteBasePath.pop_back();
+        if (!relativePath.empty())
+            options.remoteBasePath += "/" + relativePath;
+        options.rcloneConfigPath = (preferences
+                ? preferences->streamRcloneConfigPath() : u"/root/libtorrent-stream/rclone.conf"_s).toStdString();
+        options.manifestDir = specialFolderLocation(SpecialFolder::Data).data().toStdString()
+                + "/cloud_chunks/" + options.infoHash;
+        return options;
     }
 }
 
@@ -176,26 +177,8 @@ void CustomDiskIOThread::updateTorrentStreamMode(const lt::sha1_hash &ih, bool e
         if (it->infoHash == ih)
         {
             if (enabled && !it->streamStorage && it->files.is_valid() && (it->files.num_pieces() > 0))
-            {
-                BitTorrent::StreamOptions opts;
-                const auto *pref = Preferences::instance();
-                opts.maxBufferBytes = static_cast<std::size_t>(pref ? pref->streamRamBufferLimit() : 64) * 1024 * 1024;
-                const std::string hexHash = lt::aux::to_hex(ih);
-                const std::string fifoPath = "/tmp/qbt-stream-" + hexHash + ".fifo";
-                if (!pref || pref->isStreamFifoOutputEnabled())
-                {
-                    ::mkfifo(fifoPath.c_str(), 0666);
-                    ::unlink("/tmp/qbt-stream-latest.fifo");
-                    const int symRes = ::symlink(fifoPath.c_str(), "/tmp/qbt-stream-latest.fifo"); (void)symRes;
-                    opts.fifoPath = fifoPath;
-                }
-
-                const QString sPathQ = it->savePath.toString();
-                opts.targetDirPath = resolveStreamTargetDir(sPathQ, pref);
-                if (opts.targetDirPath.empty())
-                    opts.outputPath = fifoPath;
-                it->streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(it->files, opts);
-            }
+                it->streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(it->files
+                        , makeStreamOptions(ih, it->savePath.data().toStdString()));
             else if (!enabled && it->streamStorage)
             {
                 it->streamStorage.reset();
@@ -259,25 +242,8 @@ lt::storage_holder CustomDiskIOThread::new_torrent(const lt::storage_params &sto
     {
         std::lock_guard<std::mutex> lock(s_streamMutex);
         if (isStream && data.files.is_valid() && (data.files.num_pieces() > 0))
-        {
-            BitTorrent::StreamOptions opts;
-            const auto *pref = Preferences::instance();
-            opts.maxBufferBytes = static_cast<std::size_t>(pref ? pref->streamRamBufferLimit() : 64) * 1024 * 1024;
-            const std::string hexHash = lt::aux::to_hex(storageParams.info_hash);
-            const std::string fifoPath = "/tmp/qbt-stream-" + hexHash + ".fifo";
-            if (!pref || pref->isStreamFifoOutputEnabled())
-            {
-                ::mkfifo(fifoPath.c_str(), 0666);
-                ::unlink("/tmp/qbt-stream-latest.fifo");
-                const int symRes = ::symlink(fifoPath.c_str(), "/tmp/qbt-stream-latest.fifo");
-                (void)symRes;
-                opts.fifoPath = fifoPath;
-            }
-            opts.targetDirPath = resolveStreamTargetDir(QString::fromStdString(storageParams.path), pref);
-            if (opts.targetDirPath.empty())
-                opts.outputPath = fifoPath;
-            data.streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(data.files, opts);
-        }
+            data.streamStorage = std::make_shared<BitTorrent::SlidingWindowStorage>(data.files
+                    , makeStreamOptions(storageParams.info_hash, storageParams.path));
     }
 
     {
@@ -339,7 +305,7 @@ bool CustomDiskIOThread::async_write(lt::storage_index_t storage, const lt::peer
         lt::post(m_ioc, [handler = std::move(handler)] {
             handler(lt::storage_error());
         });
-        return streamStorage->isWriteQueueFull();
+        return false;
     }
 
     return m_nativeDiskIO->async_write(storage, peerRequest, buf, std::move(diskObserver), std::move(handler), flags);
@@ -458,7 +424,7 @@ void CustomDiskIOThread::async_check_files(lt::storage_index_t storage, const lt
     if (hasStream)
     {
         lt::post(m_ioc, [handler = std::move(handler)] {
-            handler(lt::status_t::no_error, lt::storage_error{});
+            handler(lt::status_t::need_full_check, lt::storage_error{});
         });
         return;
     }
