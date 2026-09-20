@@ -493,7 +493,7 @@ qlonglong TorrentImpl::completedSize() const
         const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
         const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
         const qlonglong streamed = static_cast<qlonglong>(::CustomDiskIOThread::torrentStreamedBytes(ih));
-        return std::min(totalSize(), streamed + m_nativeStatus.total_wanted_done);
+        return std::min(totalSize(), streamed);
 #else
         return m_nativeStatus.total_wanted_done;
 #endif
@@ -1261,8 +1261,7 @@ bool TorrentImpl::isFinished() const
 #ifdef QBT_USES_LIBTORRENT2
         const lt::info_hash_t nativeHash = static_cast<lt::info_hash_t>(infoHash());
         const lt::sha1_hash ih = nativeHash.has_v1() ? nativeHash.v1 : lt::sha1_hash(nativeHash.v2.data());
-        const int headIdx = static_cast<int>(::CustomDiskIOThread::torrentHeadPiece(ih));
-        return headIdx >= m_torrentInfo.piecesCount();
+        return ::CustomDiskIOThread::torrentStreamedBytes(ih) >= static_cast<std::uint64_t>(totalSize());
 #else
         return false;
 #endif

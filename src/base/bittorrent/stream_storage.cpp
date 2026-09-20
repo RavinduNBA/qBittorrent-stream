@@ -1,8 +1,12 @@
 #include "stream_storage.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -41,12 +45,16 @@ namespace BitTorrent
     {
         std::signal(SIGPIPE, SIG_IGN);
         m_totalPieces = m_files.is_valid() ? m_files.num_pieces() : 0;
+        std::error_code error;
+        std::filesystem::remove_all(m_opts.spoolDir, error);
+        error.clear();
+        std::filesystem::create_directories(m_opts.spoolDir, error);
+        m_uploaderThread = std::thread(&SlidingWindowStorage::uploaderLoop, this);
     }
 
     SlidingWindowStorage::~SlidingWindowStorage()
     {
-        tryFlushAndEvict();
-        closeRemoteFile();
+        stop();
     }
 
     int SlidingWindowStorage::calculatePieceSize(const lt::piece_index_t piece) const
@@ -63,6 +71,18 @@ namespace BitTorrent
         for (const auto &[piece, slot] : m_window)
             total += slot.data.size();
         return total;
+    }
+
+    lt::piece_index_t SlidingWindowStorage::headPiece() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_headPiece;
+    }
+
+    std::uint64_t SlidingWindowStorage::totalStreamedBytes() const
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_totalStreamedBytes;
     }
 
     bool SlidingWindowStorage::isWriteQueueFull() const
@@ -205,7 +225,7 @@ namespace BitTorrent
                 return;
             it->second.verified = true;
         }
-        tryFlushAndEvict();
+        spoolVerifiedPieces();
     }
 
     bool SlidingWindowStorage::openRemoteFile(const lt::file_index_t file)
@@ -269,7 +289,15 @@ namespace BitTorrent
 
     void SlidingWindowStorage::stop()
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (m_stopping)
+                return;
+            m_stopping = true;
+        }
+        m_spoolCondition.notify_all();
+        if (m_uploaderThread.joinable())
+            m_uploaderThread.join();
         closeRemoteFile();
     }
 
@@ -308,52 +336,77 @@ namespace BitTorrent
         return true;
     }
 
-    bool SlidingWindowStorage::uploadBytes(const std::vector<lt::piece_index_t> &pieces, const std::size_t size)
+    void SlidingWindowStorage::spoolVerifiedPieces()
     {
-        std::int64_t offset = static_cast<std::int64_t>(static_cast<int>(pieces.front()))
-                * m_files.piece_length();
-        std::size_t written = 0;
-        for (const lt::piece_index_t piece : pieces)
+        std::lock_guard<std::mutex> lock(m_mutex);
+        while (true)
         {
-            const auto it = m_window.find(piece);
-            if ((it == m_window.end()) || !writeTorrentRange(it->second.data.data(), it->second.data.size(), offset))
-                return false;
-            offset += static_cast<std::int64_t>(it->second.data.size());
-            written += it->second.data.size();
+            const auto it = m_window.find(m_headPiece);
+            if ((it == m_window.end()) || !it->second.verified)
+                break;
+
+            const std::size_t size = it->second.data.size();
+            if ((m_spoolBytes + size) > m_opts.maxSpoolBytes)
+                break;
+
+            const std::int64_t torrentOffset = static_cast<std::int64_t>(static_cast<int>(m_headPiece))
+                    * m_files.piece_length();
+            const std::string path = m_opts.spoolDir + "/segment-" + std::to_string(m_segmentIndex++) + ".bin";
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            output.write(it->second.data.data(), static_cast<std::streamsize>(size));
+            output.close();
+            if (!output)
+                break;
+
+            m_committedPieceHashes[m_headPiece] = lt::hasher(it->second.data).final();
+            m_window.erase(it);
+            m_spoolQueue.push_back({path, torrentOffset, size});
+            m_spoolBytes += size;
+            m_headPiece = lt::piece_index_t(static_cast<int>(m_headPiece) + 1);
         }
-        return written == size;
+        m_spoolCondition.notify_one();
+    }
+
+    void SlidingWindowStorage::uploaderLoop()
+    {
+        while (true)
+        {
+            SpoolSegment segment;
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_spoolCondition.wait(lock, [this] { return m_stopping || !m_spoolQueue.empty(); });
+                if (m_spoolQueue.empty())
+                    break;
+                segment = m_spoolQueue.front();
+            }
+
+            std::ifstream input(segment.path, std::ios::binary);
+            std::vector<char> data((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            const bool success = (data.size() == segment.size)
+                    && writeTorrentRange(data.data(), data.size(), segment.torrentOffset);
+            if (!success)
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                if (m_stopping)
+                    break;
+                m_spoolCondition.wait_for(lock, std::chrono::seconds(1));
+                continue;
+            }
+
+            std::error_code error;
+            std::filesystem::remove(segment.path, error);
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_spoolQueue.pop_front();
+                m_spoolBytes -= segment.size;
+                m_totalStreamedBytes += segment.size;
+            }
+            spoolVerifiedPieces();
+        }
     }
 
     void SlidingWindowStorage::tryFlushAndEvict()
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        std::vector<lt::piece_index_t> pieces;
-        std::size_t size = 0;
-        lt::piece_index_t piece = m_headPiece;
-        while (true)
-        {
-            const auto it = m_window.find(piece);
-            if ((it == m_window.end()) || !it->second.verified)
-                break;
-            pieces.push_back(piece);
-            size += it->second.data.size();
-            const bool isLastPiece = (static_cast<int>(piece) + 1) >= m_totalPieces;
-            if ((size >= m_opts.maxBufferBytes) || isLastPiece)
-                break;
-            piece = lt::piece_index_t(static_cast<int>(piece) + 1);
-        }
-
-        if (pieces.empty())
-            return;
-        if (!uploadBytes(pieces, size))
-            return;
-
-        for (const lt::piece_index_t uploadedPiece : pieces)
-            m_committedPieceHashes[uploadedPiece] = lt::hasher(m_window.at(uploadedPiece).data).final();
-        m_totalStreamedBytes += size;
-        m_headPiece = lt::piece_index_t(static_cast<int>(pieces.back()) + 1);
-
-        for (const lt::piece_index_t uploadedPiece : pieces)
-            m_window.erase(uploadedPiece);
+        spoolVerifiedPieces();
     }
 }

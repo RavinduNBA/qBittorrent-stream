@@ -73,6 +73,7 @@ namespace
                 ? preferences->streamRcloneConfigPath() : u"/root/libtorrent-stream/rclone.conf"_s).toStdString();
         options.manifestDir = specialFolderLocation(SpecialFolder::Data).data().toStdString()
                 + "/cloud_chunks/" + options.infoHash;
+        options.spoolDir = "/mnt/local-disk/.qbt-cloud-spool/" + options.infoHash;
         return options;
     }
 }

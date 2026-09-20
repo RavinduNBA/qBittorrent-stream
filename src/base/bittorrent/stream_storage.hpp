@@ -7,12 +7,15 @@
 #include <libtorrent/units.hpp>
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace lt = libtorrent;
@@ -25,7 +28,9 @@ namespace BitTorrent
         std::string infoHash;
         std::string manifestDir;
         std::string rcloneConfigPath;
+        std::string spoolDir;
         std::size_t maxBufferBytes = 64 * 1024 * 1024;
+        std::uint64_t maxSpoolBytes = 4ULL * 1024 * 1024 * 1024;
     };
 
     struct PieceSlot
@@ -56,14 +61,22 @@ namespace BitTorrent
         bool isWriteQueueFull() const;
         bool hasCommittedPiece(lt::piece_index_t piece) const;
 
-        lt::piece_index_t headPiece() const { return m_headPiece; }
+        lt::piece_index_t headPiece() const;
         std::size_t activeBufferedBytes() const;
-        std::uint64_t totalStreamedBytes() const { return m_totalStreamedBytes; }
+        std::uint64_t totalStreamedBytes() const;
         int totalPieces() const { return m_totalPieces; }
 
     private:
         int calculatePieceSize(lt::piece_index_t piece) const;
-        bool uploadBytes(const std::vector<lt::piece_index_t> &pieces, std::size_t size);
+        struct SpoolSegment
+        {
+            std::string path;
+            std::int64_t torrentOffset = 0;
+            std::size_t size = 0;
+        };
+
+        void spoolVerifiedPieces();
+        void uploaderLoop();
         bool writeTorrentRange(const char *data, std::size_t size, std::int64_t torrentOffset);
         bool openRemoteFile(lt::file_index_t file);
         bool closeRemoteFile();
@@ -79,6 +92,12 @@ namespace BitTorrent
         std::map<lt::piece_index_t, lt::sha1_hash> m_committedPieceHashes;
 
         std::uint64_t m_totalStreamedBytes = 0;
+        std::uint64_t m_spoolBytes = 0;
+        std::uint64_t m_segmentIndex = 0;
+        std::deque<SpoolSegment> m_spoolQueue;
+        std::condition_variable m_spoolCondition;
+        std::thread m_uploaderThread;
+        bool m_stopping = false;
         lt::file_index_t m_openFile {lt::file_index_t {-1}};
         int m_uploadFd = -1;
         int m_uploadPid = -1;
